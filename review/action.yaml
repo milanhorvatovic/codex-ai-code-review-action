@@ -1,0 +1,63 @@
+name: "Codex Review — Review"
+description: "Prepare diff, split into chunks, and run Codex review (read-only job). Produces .codex/ artifacts for the publish action."
+
+branding:
+  color: "purple"
+  icon: "eye"
+
+inputs:
+  allowed-users:
+    description: "Comma-separated GitHub usernames allowed to trigger reviews. Empty = all users allowed."
+    required: false
+    default: ""
+
+  github-token:
+    description: "GitHub token for fetching PR base commit. Only needs contents: read permission."
+    required: false
+    default: ${{ github.token }}
+
+  max-chunk-bytes:
+    description: "Target maximum bytes per diff chunk. Splitting occurs at file boundaries, so a chunk may exceed this size if a single file's diff is larger."
+    required: false
+    default: "204800"
+
+  model:
+    description: "OpenAI model to use (e.g. o4-mini, codex-mini-latest). Uses the API default when omitted."
+    required: false
+
+  openai-api-key:
+    description: "OpenAI API key for Codex."
+    required: true
+
+  retain-findings:
+    description: "Upload review findings as a long-lived artifact for auditing or analytics."
+    required: false
+    default: "false"
+
+  review-reference-file:
+    description: "Path to a custom review reference markdown file. Uses the built-in default if empty."
+    required: false
+    default: ""
+
+outputs:
+  chunk-count:
+    description: "Number of diff chunks processed."
+
+  chunk-matrix:
+    description: "JSON-encoded chunk metadata for the review run."
+
+  findings-count:
+    description: "Total number of findings in the merged review."
+
+  has-changes:
+    description: "Whether the PR diff contains changes (true/false)."
+
+  skipped:
+    description: "Whether the review was skipped (true/false)."
+
+  verdict:
+    description: "Overall correctness verdict."
+
+runs:
+  main: "../dist/review/main.js"
+  using: "node22"

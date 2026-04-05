@@ -1,0 +1,43 @@
+name: "Codex Review — Publish"
+description: "Validate and publish Codex review as a GitHub PR review with inline comments (write-access job). Requires .codex/ artifacts from the review action."
+
+branding:
+  color: "purple"
+  icon: "message-square"
+
+inputs:
+  github-token:
+    description: "GitHub token for posting PR reviews. Requires pull-requests: write permission."
+    required: true
+    default: ${{ github.token }}
+
+  max-comments:
+    description: "Maximum number of inline review comments posted on the PR. Omit for unlimited."
+    required: false
+    default: ""
+
+  min-confidence:
+    description: "Minimum confidence score (0.0-1.0) for a finding to appear as an inline comment."
+    required: false
+    default: "0"
+
+  model:
+    description: "Model name shown in the review footer. Should match the model used in the review action."
+    required: false
+    default: ""
+
+  review-effort:
+    description: "Effort label shown in the review footer (e.g. medium, high)."
+    required: false
+    default: ""
+
+outputs:
+  published:
+    description: "Whether the review was published (true/false)."
+
+  review-file:
+    description: "Path to the review output JSON file."
+
+runs:
+  main: "../dist/publish/main.js"
+  using: "node22"

@@ -63,25 +63,28 @@ async function run(): Promise<void> {
     referenceContent = fs.readFileSync(referenceFilePath, "utf8");
   }
 
-  const schema = defaultSchema as Record<string, unknown>;
+  const schema: Record<string, unknown> = defaultSchema;
   const chunkResults: ReviewOutput[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
     core.startGroup(`Reviewing chunk ${i}...`);
-    const prompt = assemblePrompt({
-      diff: chunks[i],
-      headSha: prContext.headSha,
-      prBody: prContext.body,
-      prNumber: prContext.number,
-      prTitle: prContext.title,
-      promptTemplate: defaultPrompt,
-      reference: referenceContent,
-      reviewRunId: `${Date.now()}-${i}`,
-    });
+    try {
+      const prompt = assemblePrompt({
+        diff: chunks[i],
+        headSha: prContext.headSha,
+        prBody: prContext.body,
+        prNumber: prContext.number,
+        prTitle: prContext.title,
+        promptTemplate: defaultPrompt,
+        reference: referenceContent,
+        reviewRunId: `${Date.now()}-${i}`,
+      });
 
-    const result = await reviewChunk(prompt, schema, inputs.model, inputs.apiKey);
-    chunkResults.push(result);
-    core.endGroup();
+      const result = await reviewChunk(prompt, schema, inputs.model, inputs.apiKey);
+      chunkResults.push(result);
+    } finally {
+      core.endGroup();
+    }
   }
 
   core.startGroup("Merging chunk reviews");

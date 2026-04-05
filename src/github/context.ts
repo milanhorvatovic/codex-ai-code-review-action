@@ -12,13 +12,28 @@ export function getPullRequestContext(): PrContext {
     );
   }
 
+  const baseSha = String(pr.base?.sha ?? "");
+  if (!baseSha) {
+    throw new Error("Pull request payload is missing base SHA.");
+  }
+
+  const headSha = String(pr.head?.sha ?? "");
+  if (!headSha) {
+    throw new Error("Pull request payload is missing head SHA.");
+  }
+
+  const number = Number(pr.number);
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error(`Pull request payload has invalid number: ${String(pr.number)}`);
+  }
+
   return {
     author: String(pr.user?.login ?? ""),
-    baseSha: String(pr.base?.sha ?? ""),
+    baseSha,
     body: String(pr.body ?? ""),
-    headSha: String(pr.head?.sha ?? ""),
+    headSha,
     isDraft: Boolean(pr.draft),
-    number: Number(pr.number),
+    number,
     title: String(pr.title ?? ""),
   };
 }

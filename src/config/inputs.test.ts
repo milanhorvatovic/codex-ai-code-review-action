@@ -134,4 +134,29 @@ describe("getPublishInputs", () => {
     const result = getPublishInputs();
     expect(result.maxComments).toBe(Infinity);
   });
+
+  it("allows max-comments of 0", () => {
+    mockGetInput.mockImplementation((name: string) =>
+      name === "github-token" ? "token" : name === "max-comments" ? "0" : "",
+    );
+
+    const result = getPublishInputs();
+    expect(result.maxComments).toBe(0);
+  });
+
+  it("throws for negative max-comments", () => {
+    mockGetInput.mockImplementation((name: string) =>
+      name === "github-token" ? "token" : name === "max-comments" ? "-1" : "",
+    );
+
+    expect(() => getPublishInputs()).toThrow("non-negative integer");
+  });
+
+  it("throws for non-integer max-comments", () => {
+    mockGetInput.mockImplementation((name: string) =>
+      name === "github-token" ? "token" : name === "max-comments" ? "abc" : "",
+    );
+
+    expect(() => getPublishInputs()).toThrow("non-negative integer");
+  });
 });

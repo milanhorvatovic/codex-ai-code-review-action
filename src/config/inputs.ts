@@ -39,11 +39,15 @@ export function getPublishInputs(): PublishInputs {
     ? Math.min(1, Math.max(0, rawMinConfidence))
     : 0;
 
-  const rawMaxComments = Number(core.getInput("max-comments"));
-  const maxComments =
-    Number.isInteger(rawMaxComments) && rawMaxComments > 0
-      ? rawMaxComments
-      : Infinity;
+  const maxCommentsInput = core.getInput("max-comments").trim();
+  let maxComments = Infinity;
+  if (maxCommentsInput !== "") {
+    const parsed = Number(maxCommentsInput);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new Error("Input 'max-comments' must be a non-negative integer or empty for unlimited.");
+    }
+    maxComments = parsed;
+  }
 
   return {
     githubToken,

@@ -238,7 +238,6 @@ interface ReviewBodyParams {
   skippedIncomplete: number;
   skippedInvalidLocation: number;
   skippedLowConfidence: number;
-  skippedTruncated: number;
   summaryText: string;
   totalChangedFiles: number;
 }
@@ -354,9 +353,6 @@ function buildMetadataSection(params: ReviewBodyParams): string {
     params.skippedLowConfidence > 0
       ? `Skipped ${params.skippedLowConfidence} finding(s) below confidence threshold.`
       : null,
-    params.skippedTruncated > 0
-      ? `Truncated ${params.skippedTruncated} comment(s) to fit GitHub limits.`
-      : null,
   ].filter(Boolean);
 
   return notes.length > 0
@@ -469,7 +465,6 @@ export async function publishReview(params: PublishParams): Promise<void> {
   const reviewComments: ReviewComment[] = [];
   let skippedInvalidLocation = 0;
   let skippedLowConfidence = 0;
-  let skippedTruncated = 0;
 
   const existingReviewComments = await octokit.paginate(
     octokit.rest.pulls.listReviewComments,
@@ -503,9 +498,6 @@ export async function publishReview(params: PublishParams): Promise<void> {
     }
 
     const comment = buildInlineComment(finding, signature);
-    if (comment.body.length > MAX_INLINE_BODY_CHARS) {
-      skippedTruncated += 1;
-    }
     reviewComments.push(comment);
 
     if (reviewComments.length >= params.maxComments) {
@@ -535,7 +527,6 @@ export async function publishReview(params: PublishParams): Promise<void> {
     skippedIncomplete,
     skippedInvalidLocation,
     skippedLowConfidence,
-    skippedTruncated,
     summaryText,
     totalChangedFiles,
   };

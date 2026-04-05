@@ -66,18 +66,52 @@ describe("getPullRequestContext", () => {
     expect(result.isDraft).toBe(true);
   });
 
-  it("defaults all nullable fields when payload is minimal", () => {
+  it("throws when base SHA is missing", () => {
     github.context.payload = {
       pull_request: {
+        head: { sha: "head" },
+        number: 1,
+      },
+    };
+
+    expect(() => getPullRequestContext()).toThrow("missing base SHA");
+  });
+
+  it("throws when head SHA is missing", () => {
+    github.context.payload = {
+      pull_request: {
+        base: { sha: "base" },
+        number: 1,
+      },
+    };
+
+    expect(() => getPullRequestContext()).toThrow("missing head SHA");
+  });
+
+  it("throws when number is invalid", () => {
+    github.context.payload = {
+      pull_request: {
+        base: { sha: "base" },
+        head: { sha: "head" },
+        number: NaN,
+      },
+    };
+
+    expect(() => getPullRequestContext()).toThrow("invalid number");
+  });
+
+  it("defaults optional fields when payload has only required fields", () => {
+    github.context.payload = {
+      pull_request: {
+        base: { sha: "base" },
+        head: { sha: "head" },
         number: 1,
       },
     };
 
     const result = getPullRequestContext();
     expect(result.author).toBe("");
-    expect(result.baseSha).toBe("");
     expect(result.body).toBe("");
-    expect(result.headSha).toBe("");
     expect(result.isDraft).toBe(false);
     expect(result.title).toBe("");
   });

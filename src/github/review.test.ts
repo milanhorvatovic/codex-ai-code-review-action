@@ -283,7 +283,6 @@ describe("buildReviewBody", () => {
     skippedIncomplete: 0,
     skippedInvalidLocation: 1,
     skippedLowConfidence: 0,
-    skippedTruncated: 0,
     summaryText: "This PR adds a new feature",
     totalChangedFiles: 2,
   };
@@ -338,7 +337,6 @@ describe("buildReviewBody", () => {
       skippedIncomplete: 0,
       skippedInvalidLocation: 0,
       skippedLowConfidence: 0,
-      skippedTruncated: 0,
     });
     expect(body).not.toContain("Review metadata");
   });
@@ -349,12 +347,10 @@ describe("buildReviewBody", () => {
       skippedIncomplete: 2,
       skippedInvalidLocation: 3,
       skippedLowConfidence: 1,
-      skippedTruncated: 1,
     });
     expect(body).toContain("Skipped 3 finding(s) not on changed RIGHT-side lines.");
     expect(body).toContain("Skipped 2 incomplete finding(s).");
     expect(body).toContain("Skipped 1 finding(s) below confidence threshold.");
-    expect(body).toContain("Truncated 1 comment(s) to fit GitHub limits.");
   });
 
   it("omits verdict for unknown correctness", () => {

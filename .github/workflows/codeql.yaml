@@ -1,0 +1,29 @@
+name: "CodeQL Code Scanning"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  analyze:
+    name: CodeQL TypeScript Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13 # v4
+        with:
+          languages: javascript-typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@c10b8064de6f491fea524254123dbe5e09572f13 # v4
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4

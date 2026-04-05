@@ -1,8 +1,13 @@
 # Dependencies
 node_modules/
 
+# Review artifacts
+.codex/
+
+# Coverage
+coverage/
+
 # Build artifacts
-*.js.map
 *.tsbuildinfo
 
 # Secrets
@@ -17,3 +22,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+*.swo
+*~

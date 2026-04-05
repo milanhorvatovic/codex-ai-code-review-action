@@ -1,0 +1,15 @@
+version: 2
+
+updates:
+  - directory: "/"
+    ecosystem: "github-actions"
+    schedule:
+      interval: "weekly"
+    target-branch: "main"
+
+  - directory: "/"
+    ecosystem: "npm"
+    schedule:
+      interval: "weekly"
+    target-branch: "main"
+    versioning-strategy: "increase"

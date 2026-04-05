@@ -1,0 +1,84 @@
+import * as core from "@actions/core";
+import OpenAI from "openai";
+
+import type { ReviewOutput } from "../config/types.js";
+
+const DEFAULT_MODEL = "codex-mini-latest";
+const REQUEST_TIMEOUT_MS = 300_000;
+const MAX_RETRIES = 3;
+
+export async function reviewChunk(
+  prompt: string,
+  schema: Record<string, unknown>,
+  model: string,
+  apiKey: string,
+): Promise<ReviewOutput> {
+  const resolvedModel = model.trim() || DEFAULT_MODEL;
+  const client = new OpenAI({
+    apiKey,
+    maxRetries: MAX_RETRIES,
+    timeout: REQUEST_TIMEOUT_MS,
+  });
+
+  core.info(`Model: ${resolvedModel}`);
+  core.info(`Prompt: ${prompt.length} chars`);
+
+  const response = await client.responses.create({
+    input: [{ content: prompt, role: "user" }],
+    model: resolvedModel,
+    text: {
+      format: {
+        name: "code_review",
+        schema,
+        strict: true,
+        type: "json_schema",
+      },
+    },
+  });
+
+  const text = extractResponseText(response);
+  const parsed: unknown = JSON.parse(text);
+
+  if (!isReviewOutput(parsed)) {
+    throw new Error("API response does not match ReviewOutput shape");
+  }
+
+  core.info(`Review output: ${text.length} chars`);
+  return parsed;
+}
+
+function extractResponseText(response: OpenAI.Responses.Response): string {
+  if (Array.isArray(response.output)) {
+    for (const item of response.output) {
+      if (item.type === "message" && Array.isArray(item.content)) {
+        for (const content of item.content) {
+          if (content.type === "output_text" && typeof content.text === "string") {
+            return content.text;
+          }
+        }
+      }
+    }
+  }
+
+  throw new Error(
+    `Unexpected API response structure: ${JSON.stringify(response).slice(0, 500)}`,
+  );
+}
+
+function isReviewOutput(value: unknown): value is ReviewOutput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.summary === "string" &&
+    Array.isArray(obj.findings) &&
+    Array.isArray(obj.changes) &&
+    Array.isArray(obj.files) &&
+    typeof obj.model === "string" &&
+    (obj.overall_correctness === "patch is correct" ||
+      obj.overall_correctness === "patch is incorrect") &&
+    typeof obj.overall_confidence_score === "number" &&
+    Number.isFinite(obj.overall_confidence_score)
+  );
+}

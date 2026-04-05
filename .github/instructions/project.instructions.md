@@ -11,18 +11,20 @@ This is a TypeScript GitHub Action for AI-powered code review using OpenAI Codex
 - Two-job design with security isolation:
   - **Review job** (read-only): diff chunking, prompt assembly, structured findings
   - **Publish job** (write-access): inline PR comments, per-file summaries, verdict
-- Bundled with `esbuild` into a single `dist/main.js`
-- Runs on Node 22 (`node22` GitHub Actions runtime)
+- Two separate Node 22 JavaScript actions, each bundled independently by `esbuild`
+- Default prompt and reference files embedded at build time via esbuild text loader
 
 ## Module Structure
 
 ```
 src/
-├── core/          # Pure business logic (review engine, diff processing)
-├── github/        # GitHub API interaction (read context, post comments)
-├── openai/        # OpenAI API integration (prompts, retry, rate limiting)
-├── config/        # Configuration constants and defaults
-└── main.ts        # Entry point and orchestration
+├── review/main.ts       # Review action entry point
+├── publish/main.ts      # Publish action entry point
+├── core/                # Pure business logic (diff processing, prompt assembly, merging)
+├── github/              # GitHub API interaction (PR context, review posting)
+├── openai/              # OpenAI API integration (structured output, retry)
+├── config/              # Configuration (types, inputs, embedded defaults)
+└── types/               # TypeScript declarations (.md text imports)
 ```
 
 ## Build and Validation
@@ -30,6 +32,8 @@ src/
 - Build: `npm run build`
 - Type check: `npm run typecheck`
 - Test: `npm test`
+- Lint: `npm run lint`
+- Coverage: `npm run test -- --coverage`
 
 ## Conventions
 
@@ -38,6 +42,9 @@ src/
 - Modular design: small, composable modules with clear boundaries
 - Extract modules when it reduces complexity, not just to split files
 - Keep coupling low and cohesion high
+- Co-located tests (`*.test.ts` alongside source files)
+- Pure functions in `src/core/` — no side effects or direct I/O
+- Constructor injection for external dependencies (testability)
 
 ## Security Model
 

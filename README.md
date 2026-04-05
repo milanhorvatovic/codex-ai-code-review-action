@@ -1,2 +1,166 @@
-# codex-code-review-action
+# codex-review-action
+
+[![Tests](https://github.com/milanhorvatovic/codex-review-action/actions/workflows/tests.yaml/badge.svg)](https://github.com/milanhorvatovic/codex-review-action/actions/workflows/tests.yaml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmilanhorvatovic%2Fcodex-review-action%2Fbadges%2Fcoverage.json)](https://github.com/milanhorvatovic/codex-review-action/actions/workflows/tests.yaml)
+
 AI-powered code review GitHub Action using OpenAI Codex. Two-job design with security isolation: read-only review job (diff chunking, prompt assembly, structured findings) and write-access publish job (inline PR comments, per-file summaries, verdict). Fully configurable prompts, models, confidence thresholds, and user allowlists.
+
+## Quick start
+
+Create `.github/workflows/codex-review.yaml` in your repository:
+
+```yaml
+name: Codex code review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: milanhorvatovic/codex-review-action/review@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-review
+          path: |
+            .codex/review-output.json
+            .codex/pr.diff
+          include-hidden-files: true
+          retention-days: 1
+
+  publish:
+    needs: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-review
+          path: .codex/
+
+      - uses: milanhorvatovic/codex-review-action/publish@v1
+```
+
+## Architecture
+
+The action is split into two Node 22 TypeScript actions for security isolation:
+
+| Action | Job permissions | Purpose |
+|--------|----------------|---------|
+| `review` | `contents: read` | Build diff, split into chunks, assemble prompts, call OpenAI API, merge results |
+| `publish` | `contents: read`, `pull-requests: write` | Validate review output, post PR review with inline comments |
+
+The review job never gets write access to the repository. The publish job never sees the OpenAI API key. Artifact handoff between jobs is explicit.
+
+```
+review job                              publish job
+───────────                             ────────────
+check allowlist                         validate JSON
+build PR diff (git)                     publish review
+split diff into chunks                    ├── PR review body
+assemble prompts                          ├── inline comments
+call OpenAI API (per chunk)               ├── verdict + confidence
+merge chunk results                       └── per-file summary
+       │                                        ▲
+       └── upload .codex/ ──────────── download .codex/
+```
+
+## Configuration
+
+### Review action inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `openai-api-key` | Yes | — | OpenAI API key |
+| `model` | No | API default | Model to use (e.g. `o4-mini`, `codex-mini-latest`) |
+| `allowed-users` | No | all users | Comma-separated allowlist of GitHub usernames |
+| `review-reference-file` | No | built-in | Path to custom review reference |
+| `max-chunk-bytes` | No | `204800` | Max bytes per diff chunk |
+| `retain-findings` | No | `false` | Upload findings as long-lived artifact |
+
+### Publish action inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `github-token` | No | `github.token` | Token for posting reviews |
+| `model` | No | — | Model name for review footer |
+| `review-effort` | No | — | Effort label for review footer |
+| `min-confidence` | No | `0` | Minimum confidence threshold (0.0-1.0) |
+| `max-comments` | No | unlimited | Maximum inline comments |
+
+### Review action outputs
+
+| Output | Description |
+|--------|-------------|
+| `skipped` | Whether review was skipped (`true`/`false`) |
+| `has-changes` | Whether the diff has changes |
+| `chunk-count` | Number of chunks processed |
+| `chunk-matrix` | JSON matrix for parallel chunk workflows |
+| `findings-count` | Total findings |
+| `verdict` | `patch is correct` or `patch is incorrect` |
+
+### Publish action outputs
+
+| Output | Description |
+|--------|-------------|
+| `review-file` | Path to the review JSON |
+| `published` | Whether review was posted (`true`/`false`) |
+
+## Customizing review rules per repository
+
+The review reference file controls what the AI focuses on during reviews — language-specific checklists, focus areas, examples, and confidence calibration.
+
+To customize, create `.github/codex/review-reference.md` in your repository and pass it:
+
+```yaml
+- uses: milanhorvatovic/codex-review-action/review@v1
+  with:
+    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    review-reference-file: .github/codex/review-reference.md
+```
+
+See [`defaults/review-reference.md`](defaults/review-reference.md) for the structure and examples.
+
+## Setup
+
+1. Add `OPENAI_API_KEY` as a repository secret (Settings > Secrets and variables > Actions)
+2. Create the workflow file as shown in [Quick start](#quick-start)
+3. Optionally create `.github/codex/review-reference.md` for repo-specific review rules
+4. Open a pull request — the review appears automatically
+
+## Development
+
+Prerequisites: Node 22
+
+```bash
+npm install          # Install dependencies
+npm run build        # Build dist bundles
+npm test             # Run tests
+npm run test -- --coverage  # Run tests with coverage
+npm run lint         # Lint source code
+npm run typecheck    # Type check
+```
+
+## License
+
+MIT

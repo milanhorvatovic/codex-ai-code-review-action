@@ -37,6 +37,9 @@ Each finding should include:
 - Architecture: tight coupling, single responsibility violations, missing boundaries
 - Types: incorrect types, unsafe assertions, missing null checks
 - Edge cases: empty inputs, boundary values, concurrent access
+- Testing: new modules must include co-located test files (`*.test.ts`)
+- Testability: external dependencies should use constructor injection
+- Purity: business logic in `src/core/` must be pure — no side effects or direct I/O
 
 ## Noise Reduction
 

@@ -22,18 +22,21 @@ export function splitDiff(diff: string, maxChunkBytes: number): string[] {
 
   const chunks: string[] = [];
   let currentChunk = "";
+  let currentBytes = 0;
 
   for (const section of fileSections) {
     const sectionBytes = Buffer.byteLength(section, "utf-8");
-    const currentBytes = Buffer.byteLength(currentChunk, "utf-8");
 
     if (currentChunk === "") {
       currentChunk = section;
+      currentBytes = sectionBytes;
     } else if (currentBytes + sectionBytes <= maxChunkBytes) {
       currentChunk += section;
+      currentBytes += sectionBytes;
     } else {
       chunks.push(currentChunk);
       currentChunk = section;
+      currentBytes = sectionBytes;
     }
   }
 

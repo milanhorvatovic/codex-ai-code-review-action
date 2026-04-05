@@ -44,7 +44,7 @@ outputs:
     description: "Number of diff chunks processed."
 
   chunk-matrix:
-    description: "JSON matrix for GitHub Actions parallel chunk processing."
+    description: "JSON-encoded chunk metadata for the review run."
 
   findings-count:
     description: "Total number of findings in the merged review."

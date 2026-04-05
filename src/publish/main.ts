@@ -36,9 +36,12 @@ async function run(): Promise<void> {
 
   core.setOutput("review-file", REVIEW_OUTPUT_FILE);
 
-  const diffText = fs.existsSync(DIFF_FILE)
-    ? fs.readFileSync(DIFF_FILE, "utf8")
-    : "";
+  let diffText = "";
+  if (fs.existsSync(DIFF_FILE)) {
+    diffText = fs.readFileSync(DIFF_FILE, "utf8");
+  } else {
+    core.warning(`Diff file not found at ${DIFF_FILE}. Inline comments will be skipped because findings cannot be matched to changed lines.`);
+  }
 
   const runUrl = `${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${process.env.GITHUB_REPOSITORY ?? ""}/actions/runs/${process.env.GITHUB_RUN_ID ?? ""}`;
 

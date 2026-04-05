@@ -116,7 +116,7 @@ merge chunk results                       └── per-file summary
 | `skipped` | Whether review was skipped (`true`/`false`) |
 | `has-changes` | Whether the diff has changes |
 | `chunk-count` | Number of chunks processed |
-| `chunk-matrix` | JSON matrix for parallel chunk workflows |
+| `chunk-matrix` | JSON-encoded chunk metadata for the review run |
 | `findings-count` | Total findings |
 | `verdict` | `patch is correct` or `patch is incorrect` |
 

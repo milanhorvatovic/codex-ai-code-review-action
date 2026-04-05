@@ -4,7 +4,7 @@ updates:
   - commit-message:
       prefix: "chore"
     directory: "/"
-    ecosystem: "github-actions"
+    package-ecosystem: "github-actions"
     groups:
       github-actions:
         patterns:
@@ -20,7 +20,7 @@ updates:
   - commit-message:
       prefix: "chore"
     directory: "/"
-    ecosystem: "npm"
+    package-ecosystem: "npm"
     groups:
       dev-dependencies:
         dependency-type: "development"

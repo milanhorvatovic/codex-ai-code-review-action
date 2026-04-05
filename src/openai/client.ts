@@ -44,8 +44,7 @@ export async function reviewChunk(
   try {
     parsed = JSON.parse(text);
   } catch {
-    const excerpt = text.slice(0, 200);
-    throw new Error(`API response is not valid JSON (${text.length} chars). Excerpt: ${excerpt}`);
+    throw new Error(`API response is not valid JSON (${text.length} chars)`);
   }
 
   if (!isReviewOutput(parsed)) {
@@ -69,8 +68,11 @@ function extractResponseText(response: OpenAI.Responses.Response): string {
     }
   }
 
+  const outputTypes = Array.isArray(response.output)
+    ? response.output.map((item) => item.type).join(", ")
+    : "non-array";
   throw new Error(
-    `Unexpected API response structure: ${JSON.stringify(response).slice(0, 500)}`,
+    `Unexpected API response structure (output types: ${outputTypes})`,
   );
 }
 

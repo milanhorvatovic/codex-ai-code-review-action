@@ -26,9 +26,10 @@ export async function fetchBaseSha(
       "--is-shallow-repository",
     ], { ignoreReturnCode: true, silent: true });
 
-    const depthArgs = isShallow.stdout.trim() === "true"
+    const shallow = isShallow.stdout.trim() === "true";
+    const depthArgs = shallow
       ? ["--deepen=50"]
-      : ["--depth=1"];
+      : ["--depth=50"];
 
     await getExecOutput("git", [
       ...authArgs,

@@ -7,7 +7,6 @@ export default defineConfig({
         "**/*.test.ts",
         "src/**/main.ts",
         "src/config/defaults.ts",
-        "src/config/types.ts",
         "src/types/**",
       ],
       include: ["src/**/*.ts"],

@@ -103,11 +103,11 @@ merge chunk results                       └── per-file summary
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `github-token` | No | `github.token` | Token for posting reviews |
+| `github-token` | Yes | `github.token` | Token for posting reviews (`pull-requests: write`) |
 | `model` | No | — | Model name for review footer |
 | `review-effort` | No | — | Effort label for review footer |
 | `min-confidence` | No | `0` | Minimum confidence threshold (0.0-1.0) |
-| `max-comments` | No | unlimited | Maximum inline comments |
+| `max-comments` | No | unlimited | Maximum inline comments (0 to disable) |
 
 ### Review action outputs
 

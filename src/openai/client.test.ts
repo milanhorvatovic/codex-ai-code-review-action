@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockCreate = vi.fn();
 
@@ -26,6 +26,10 @@ const validReview: ReviewOutput = {
   overall_correctness: "patch is correct",
   summary: "Test summary",
 };
+
+beforeEach(() => {
+  mockCreate.mockReset();
+});
 
 describe("reviewChunk", () => {
   it("parses a valid response", async () => {
@@ -67,7 +71,7 @@ describe("reviewChunk", () => {
     );
   });
 
-  it("uses default model when model is empty", async () => {
+  it("omits model from API call when empty", async () => {
     mockCreate.mockResolvedValueOnce({
       output: [
         {
@@ -81,8 +85,26 @@ describe("reviewChunk", () => {
 
     await reviewChunk("prompt", {}, "", "key");
 
+    const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs.model).toBeUndefined();
+  });
+
+  it("passes the provided model to the API", async () => {
+    mockCreate.mockResolvedValueOnce({
+      output: [
+        {
+          content: [
+            { text: JSON.stringify(validReview), type: "output_text" },
+          ],
+          type: "message",
+        },
+      ],
+    });
+
+    await reviewChunk("prompt", {}, "o4-mini", "key");
+
     expect(mockCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "codex-mini-latest" }),
+      expect.objectContaining({ model: "o4-mini" }),
     );
   });
 });

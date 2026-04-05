@@ -22,9 +22,8 @@ inputs:
     default: "204800"
 
   model:
-    description: "OpenAI model to use (e.g. o4-mini, codex-mini-latest). Omit to use the API default."
+    description: "OpenAI model to use (e.g. o4-mini, codex-mini-latest). Uses the API default when omitted."
     required: false
-    default: ""
 
   openai-api-key:
     description: "OpenAI API key for Codex."

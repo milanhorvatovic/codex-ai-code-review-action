@@ -3,7 +3,6 @@ import OpenAI from "openai";
 
 import type { ReviewOutput } from "../config/types.js";
 
-const DEFAULT_MODEL = "codex-mini-latest";
 const REQUEST_TIMEOUT_MS = 300_000;
 const MAX_RETRIES = 3;
 
@@ -13,19 +12,19 @@ export async function reviewChunk(
   model: string,
   apiKey: string,
 ): Promise<ReviewOutput> {
-  const resolvedModel = model.trim() || DEFAULT_MODEL;
+  const resolvedModel = model.trim() || undefined;
   const client = new OpenAI({
     apiKey,
     maxRetries: MAX_RETRIES,
     timeout: REQUEST_TIMEOUT_MS,
   });
 
-  core.info(`Model: ${resolvedModel}`);
+  core.info(`Model: ${resolvedModel ?? "(API default)"}`);
   core.info(`Prompt: ${prompt.length} chars`);
 
   const response = await client.responses.create({
     input: [{ content: prompt, role: "user" }],
-    model: resolvedModel,
+    ...(resolvedModel ? { model: resolvedModel } : {}),
     text: {
       format: {
         name: "code_review",

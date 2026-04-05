@@ -92,7 +92,8 @@ merge chunk results                       └── per-file summary
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `openai-api-key` | Yes | — | OpenAI API key |
-| `model` | No | API default | Model to use (e.g. `o4-mini`, `codex-mini-latest`) |
+| `model` | No | — | OpenAI model to use (e.g. `o4-mini`, `codex-mini-latest`). Uses the API default when omitted. |
+| `github-token` | No | `github.token` | GitHub token for fetching PR base commit |
 | `allowed-users` | No | all users | Comma-separated allowlist of GitHub usernames |
 | `review-reference-file` | No | built-in | Path to custom review reference |
 | `max-chunk-bytes` | No | `204800` | Max bytes per diff chunk |

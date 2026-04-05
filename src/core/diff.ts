@@ -11,8 +11,16 @@ export async function fetchBaseSha(
   ], { ignoreReturnCode: true });
 
   if (check.exitCode !== 0) {
-    const url = `https://x-access-token:${token}@github.com/${process.env["GITHUB_REPOSITORY"]}.git`;
-    await getExecOutput("git", ["fetch", "--depth=1", url, baseSha]);
+    const credentials = Buffer.from(`x-access-token:${token}`).toString("base64");
+    const extraHeader = `AUTHORIZATION: basic ${credentials}`;
+    await getExecOutput("git", [
+      "-c", `http.https://github.com/.extraheader=${extraHeader}`,
+      "fetch",
+      "--no-tags",
+      "--depth=1",
+      "origin",
+      baseSha,
+    ]);
   }
 }
 

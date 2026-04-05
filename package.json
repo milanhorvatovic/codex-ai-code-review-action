@@ -13,7 +13,8 @@
   "name": "codex-code-review-action",
   "private": true,
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --minify --outfile=dist/main.js --platform=node --target=node22"
+    "build": "esbuild src/main.ts --bundle --minify --outfile=dist/main.js --platform=node --target=node22",
+    "typecheck": "tsc --noEmit"
   },
   "version": "0.1.0"
 }

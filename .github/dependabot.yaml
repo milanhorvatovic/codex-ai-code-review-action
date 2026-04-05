@@ -1,15 +1,36 @@
 version: 2
 
 updates:
-  - directory: "/"
+  - commit-message:
+      prefix: "chore"
+    directory: "/"
     ecosystem: "github-actions"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "github-actions"
     schedule:
+      day: "monday"
       interval: "weekly"
     target-branch: "main"
 
-  - directory: "/"
+  - commit-message:
+      prefix: "chore"
+    directory: "/"
     ecosystem: "npm"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+    labels:
+      - "dependencies"
+      - "npm"
     schedule:
+      day: "monday"
       interval: "weekly"
     target-branch: "main"
     versioning-strategy: "increase"

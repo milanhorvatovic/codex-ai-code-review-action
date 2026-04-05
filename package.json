@@ -6,13 +6,14 @@
   },
   "description": "AI-powered code review GitHub Action using OpenAI Codex",
   "devDependencies": {
+    "esbuild": "0.28.0",
     "typescript": "6.0.2"
   },
   "license": "MIT",
   "name": "codex-code-review-action",
   "private": true,
   "scripts": {
-    "build": "tsc"
+    "build": "esbuild src/main.ts --bundle --minify --outfile=dist/main.js --platform=node --target=node22"
   },
   "version": "0.1.0"
 }

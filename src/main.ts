@@ -4,4 +4,6 @@ async function run(): Promise<void> {
   core.info("Codex Code Review Action");
 }
 
-run();
+run().catch((error) => {
+  core.setFailed(error instanceof Error ? error.message : String(error));
+});

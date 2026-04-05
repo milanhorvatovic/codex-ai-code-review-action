@@ -1,0 +1,19 @@
+{
+  "dependencies": {
+    "@actions/core": "3.0.0",
+    "@actions/github": "9.0.0",
+    "openai": "6.33.0"
+  },
+  "description": "AI-powered code review GitHub Action using OpenAI Codex",
+  "devDependencies": {
+    "esbuild": "0.28.0",
+    "typescript": "6.0.2"
+  },
+  "license": "MIT",
+  "name": "codex-code-review-action",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --minify --outfile=dist/main.js --platform=node --target=node22"
+  },
+  "version": "0.1.0"
+}

@@ -40,8 +40,6 @@ jobs:
 
       - id: prepare
         uses: milanhorvatovic/codex-ai-code-review-action/prepare@v2
-        with:
-          allow-users: ""
 
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: steps.prepare.outputs.skipped != 'true' && steps.prepare.outputs.has-changes == 'true'

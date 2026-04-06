@@ -62,8 +62,17 @@ New code should include tests. Aim to maintain or improve coverage.
 1. Update `version` in `package.json`
 2. Update `CHANGELOG.md` with the release date and any new entries
 3. Rebuild dist: `npm run build`
-4. Commit, merge to `main`, and create a GitHub release with the corresponding tag (e.g. `v1.0.0`)
-5. Move the major version tag (`v1`) to the new release commit
+4. Commit and merge to `main`
+5. Tag and push the release: `git tag vx.y.z && git push origin vx.y.z`
+6. The release workflow automatically creates a GitHub Release, generates release notes, and updates the major version tag (e.g. `v1`)
+
+> **Tip:** You can also create the tag and release in one step using the GitHub CLI:
+>
+> ```bash
+> gh release create vx.y.z --generate-notes
+> ```
+>
+> The release workflow will still run on the tag push to verify the build, run tests, and update the major version tag.
 
 ## License
 

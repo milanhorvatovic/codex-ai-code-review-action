@@ -51,7 +51,10 @@ jobs:
 
       - name: Update major version tag
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           MAJOR="${TAG%%.*}"
-          git tag -f "$MAJOR" "$GITHUB_SHA"
+          COMMIT="$(git rev-parse "${TAG}^{}")"
+          echo "Updating $MAJOR to point at commit $COMMIT (from tag $TAG)"
+          git tag -f "$MAJOR" "$COMMIT"
           git push -f origin "refs/tags/$MAJOR"

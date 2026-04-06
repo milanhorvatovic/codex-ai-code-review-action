@@ -151,6 +151,10 @@ async function run(): Promise<void> {
         { retentionDays: inputs.retainFindingsDays },
       );
       core.info(`Uploaded findings artifact: ${ARTIFACT_NAME}`);
+    } catch (error) {
+      core.warning(
+        `Failed to upload findings artifact "${ARTIFACT_NAME}": ${error instanceof Error ? error.message : String(error)}`,
+      );
     } finally {
       core.endGroup();
     }

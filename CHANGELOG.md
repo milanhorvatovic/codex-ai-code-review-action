@@ -18,9 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 
-- `review` sub-action (replaced by `prepare`)
-- `openai-api-key` action input (now passed directly to `openai/codex-action` in the review job)
-- `src/openai/client.ts` (direct OpenAI API integration)
+- Node-based `review` implementation that called the OpenAI API directly (the `review` sub-action now remains as a composite wrapper around `openai/codex-action`)
+- Direct OpenAI SDK integration (`src/openai/client.ts`) and the `openai` npm dependency
 
 ## [1.0.4] - 2026-04-06
 

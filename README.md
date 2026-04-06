@@ -32,7 +32,7 @@ jobs:
       chunk-count: ${{ steps.prepare.outputs.chunk-count }}
       chunk-matrix: ${{ steps.prepare.outputs.chunk-matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -43,7 +43,7 @@ jobs:
         with:
           allowed-users: ""
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: steps.prepare.outputs.skipped != 'true' && steps.prepare.outputs.has-changes == 'true'
         with:
           name: codex-prepare
@@ -74,7 +74,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: codex-*
           path: .codex/

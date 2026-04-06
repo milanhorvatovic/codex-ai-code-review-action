@@ -2,8 +2,8 @@ name: "Codex Review — Review"
 description: "Prepare diff, split into chunks, and run Codex review (read-only job). Produces .codex/ artifacts for the publish action."
 
 branding:
-  color: "purple"
-  icon: "eye"
+  color: "blue"
+  icon: "search"
 
 inputs:
   allowed-users:

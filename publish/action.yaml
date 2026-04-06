@@ -2,7 +2,7 @@ name: "Codex Review — Publish"
 description: "Validate and publish Codex review as a GitHub PR review with inline comments (write-access job). Requires .codex/ artifacts from the review action."
 
 branding:
-  color: "purple"
+  color: "green"
   icon: "message-square"
 
 inputs:

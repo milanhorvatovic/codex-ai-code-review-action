@@ -10,6 +10,11 @@ inputs:
     description: "Chunk index to review (from the prepare action's chunk-matrix output)."
     required: true
 
+  effort:
+    description: "Reasoning effort the agent should use. Empty = Codex CLI default."
+    required: false
+    default: ""
+
   model:
     description: "OpenAI model to use. Empty = Codex CLI default."
     required: false
@@ -29,8 +34,9 @@ runs:
 
     - uses: openai/codex-action@086169432f1d2ab2f4057540b1754d550f6a1189 # v1.4
       with:
-        openai-api-key: ${{ inputs.openai-api-key }}
+        effort: ${{ inputs.effort }}
         model: ${{ inputs.model }}
+        openai-api-key: ${{ inputs.openai-api-key }}
         output-file: .codex/chunk-${{ inputs.chunk }}-output.json
         output-schema-file: .codex/review-output-schema.json
         prompt-file: .codex/chunk-${{ inputs.chunk }}-prompt.md

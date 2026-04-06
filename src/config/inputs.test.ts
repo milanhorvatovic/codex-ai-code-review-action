@@ -24,7 +24,7 @@ describe("getPrepareInputs", () => {
   it("parses all inputs correctly", () => {
     mockGetInput.mockImplementation((name: string) => {
       const inputs: Record<string, string> = {
-        "allowed-users": "user1,user2",
+        "allow-users": "user1,user2",
         "github-token": "ghp-token",
         "max-chunk-bytes": "100000",
         "review-reference-file": ".github/codex/reference.md",

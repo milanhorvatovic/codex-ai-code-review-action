@@ -41,7 +41,7 @@ jobs:
       - id: prepare
         uses: milanhorvatovic/codex-ai-code-review-action/prepare@v2
         with:
-          allowed-users: ""
+          allow-users: ""
 
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: steps.prepare.outputs.skipped != 'true' && steps.prepare.outputs.has-changes == 'true'
@@ -118,7 +118,7 @@ upload artifacts ────────── ▶                             
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `github-token` | No | `github.token` | GitHub token for fetching PR base commit |
-| `allowed-users` | No | all users | Comma-separated allowlist of GitHub usernames |
+| `allow-users` | No | all users | Comma-separated list of GitHub usernames who can run this action |
 | `review-reference-file` | No | built-in | Path to custom review reference |
 | `max-chunk-bytes` | No | `204800` | Target max bytes per diff chunk (splits at file boundaries) |
 
@@ -140,6 +140,7 @@ The review action wraps [`openai/codex-action`](https://github.com/openai/codex-
 | `openai-api-key` | Yes | — | OpenAI API key for Codex |
 | `chunk` | Yes | — | Chunk index to review (from `chunk-matrix` output) |
 | `model` | No | Codex CLI default | OpenAI model to use |
+| `effort` | No | Codex CLI default | Reasoning effort the agent should use |
 
 ### Publish action inputs
 

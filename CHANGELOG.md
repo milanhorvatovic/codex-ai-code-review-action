@@ -11,9 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking:** Replaced direct OpenAI API calls with [`openai/codex-action`](https://github.com/openai/codex-action) for reviews
 - **Breaking:** Renamed `review` sub-action to `prepare` — it now builds diffs, splits chunks, and writes prompt files instead of calling the API
 - **Breaking:** Architecture changed from 2-job (review → publish) to 3-job (prepare → review matrix → publish) workflow
+- **Breaking:** Renamed `allowed-users` input to `allow-users` to align with `openai/codex-action` naming
 - Chunk reviews now run in parallel via GitHub Actions matrix strategy (resolves #20)
 - Publish action now handles chunk merging, retain-findings artifact upload, and exposes `findings-count` and `verdict` outputs
 - Model defaults are handled by the Codex CLI — no more 400 errors when `model` is omitted (fixes #24)
+- Added `effort` input to the review action for controlling reasoning effort
 - Removed `openai` npm dependency
 
 ### Removed

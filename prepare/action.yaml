@@ -6,8 +6,8 @@ branding:
   icon: "git-branch"
 
 inputs:
-  allowed-users:
-    description: "Comma-separated GitHub usernames allowed to trigger reviews. Empty = all users allowed."
+  allow-users:
+    description: "Comma-separated list of GitHub usernames who can run this action. Empty = all users allowed."
     required: false
     default: ""
 

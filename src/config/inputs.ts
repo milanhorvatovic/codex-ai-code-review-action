@@ -19,7 +19,7 @@ export function getPrepareInputs(): PrepareInputs {
       : MAX_CHUNK_BYTES_DEFAULT;
 
   return {
-    allowedUsers: core.getInput("allowed-users"),
+    allowedUsers: core.getInput("allow-users"),
     githubToken,
     maxChunkBytes,
     reviewReferenceFile: core.getInput("review-reference-file"),

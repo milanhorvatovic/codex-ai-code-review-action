@@ -8,6 +8,10 @@
       },
       "type": "array"
     },
+    "effort": {
+      "description": "Self-reported reasoning effort used for this review. Null when unknown.",
+      "type": ["string", "null"]
+    },
     "files": {
       "description": "Files changed in this PR with descriptions.",
       "items": {
@@ -73,10 +77,6 @@
         "type": "object"
       },
       "type": "array"
-    },
-    "effort": {
-      "description": "Self-reported reasoning effort used for this review. Null when unknown.",
-      "type": ["string", "null"]
     },
     "model": {
       "description": "Self-reported model identifier.",

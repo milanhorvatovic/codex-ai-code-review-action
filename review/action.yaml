@@ -35,7 +35,7 @@ inputs:
     default: "false"
 
   retain-findings-days:
-    description: "Number of days to retain the findings artifact. Only applies when retain-findings is true. Must be a positive integer, clamped to a maximum of 90."
+    description: "Number of days to retain the findings artifact. Only applies when retain-findings is true. Must be a positive integer; invalid or non-positive values fail the action. Values greater than 90 are clamped to 90."
     required: false
     default: "90"
 

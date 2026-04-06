@@ -4,6 +4,7 @@ vi.mock("@actions/core", () => ({
   getBooleanInput: vi.fn(),
   getInput: vi.fn(),
   setSecret: vi.fn(),
+  warning: vi.fn(),
 }));
 
 import * as core from "@actions/core";
@@ -13,6 +14,7 @@ import { getPublishInputs, getReviewInputs } from "./inputs.js";
 const mockGetInput = vi.mocked(core.getInput);
 const mockGetBooleanInput = vi.mocked(core.getBooleanInput);
 const mockSetSecret = vi.mocked(core.setSecret);
+const mockWarning = vi.mocked(core.warning);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -85,6 +87,30 @@ describe("getReviewInputs", () => {
 
     const result = getReviewInputs();
     expect(result.retainFindingsDays).toBe(90);
+  });
+
+  it("clamps retain-findings-days exceeding 90 and warns", () => {
+    mockGetInput.mockImplementation((name: string) =>
+      name === "openai-api-key" ? "key" : name === "retain-findings-days" ? "365" : "",
+    );
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const result = getReviewInputs();
+    expect(result.retainFindingsDays).toBe(90);
+    expect(mockWarning).toHaveBeenCalledWith(
+      expect.stringContaining("clamped from 365 to 90"),
+    );
+  });
+
+  it("accepts retain-findings-days within valid range without warning", () => {
+    mockGetInput.mockImplementation((name: string) =>
+      name === "openai-api-key" ? "key" : name === "retain-findings-days" ? "45" : "",
+    );
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const result = getReviewInputs();
+    expect(result.retainFindingsDays).toBe(45);
+    expect(mockWarning).not.toHaveBeenCalled();
   });
 
   it("uses default max-chunk-bytes for negative value", () => {

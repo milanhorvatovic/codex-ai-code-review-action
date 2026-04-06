@@ -4,6 +4,8 @@ import type { PublishInputs, ReviewInputs } from "./types.js";
 
 const MAX_CHUNK_BYTES_DEFAULT = 204800;
 const RETAIN_FINDINGS_DAYS_DEFAULT = 90;
+const RETAIN_FINDINGS_DAYS_MIN = 1;
+const RETAIN_FINDINGS_DAYS_MAX = 90;
 
 export function getReviewInputs(): ReviewInputs {
   const apiKey = core.getInput("openai-api-key", { required: true });
@@ -21,10 +23,13 @@ export function getReviewInputs(): ReviewInputs {
   }
 
   const rawRetainDays = Number(core.getInput("retain-findings-days"));
-  const retainFindingsDays =
-    Number.isInteger(rawRetainDays) && rawRetainDays > 0
-      ? rawRetainDays
-      : RETAIN_FINDINGS_DAYS_DEFAULT;
+  let retainFindingsDays = RETAIN_FINDINGS_DAYS_DEFAULT;
+  if (Number.isInteger(rawRetainDays) && rawRetainDays > 0) {
+    retainFindingsDays = Math.min(RETAIN_FINDINGS_DAYS_MAX, Math.max(RETAIN_FINDINGS_DAYS_MIN, rawRetainDays));
+    if (retainFindingsDays !== rawRetainDays) {
+      core.warning(`Input 'retain-findings-days' was clamped from ${rawRetainDays} to ${retainFindingsDays} (valid range: ${RETAIN_FINDINGS_DAYS_MIN}-${RETAIN_FINDINGS_DAYS_MAX}).`);
+    }
+  }
 
   return {
     allowedUsers: core.getInput("allowed-users"),

@@ -14,6 +14,14 @@ import { buildDiff, fetchBaseSha } from "./git.js";
 
 const mockGetExecOutput = vi.mocked(getExecOutput);
 
+function getFetchArgs(callIndex: number): string[] {
+  const args = mockGetExecOutput.mock.calls[callIndex][1];
+  if (!args) {
+    throw new Error(`Expected args at call index ${callIndex} to be defined`);
+  }
+  return args;
+}
+
 beforeEach(() => {
   mockGetExecOutput.mockReset();
   vi.unstubAllEnvs();
@@ -47,9 +55,9 @@ describe("fetchBaseSha", () => {
 
     expect(mockGetExecOutput).toHaveBeenCalledTimes(3);
 
-    const fetchCall = mockGetExecOutput.mock.calls[2];
-    expect(fetchCall[1]).toContain("--deepen=50");
-    expect(fetchCall[1]).not.toContain("--depth=50");
+    const fetchArgs = getFetchArgs(2);
+    expect(fetchArgs).toContain("--deepen=50");
+    expect(fetchArgs).not.toContain("--depth=50");
   });
 
   it("fetches with --depth=50 when repository is not shallow", async () => {
@@ -60,9 +68,9 @@ describe("fetchBaseSha", () => {
 
     await fetchBaseSha("abc123", "");
 
-    const fetchCall = mockGetExecOutput.mock.calls[2];
-    expect(fetchCall[1]).toContain("--depth=50");
-    expect(fetchCall[1]).not.toContain("--deepen=50");
+    const fetchArgs = getFetchArgs(2);
+    expect(fetchArgs).toContain("--depth=50");
+    expect(fetchArgs).not.toContain("--deepen=50");
   });
 
   it("includes auth header when token is provided", async () => {
@@ -73,10 +81,10 @@ describe("fetchBaseSha", () => {
 
     await fetchBaseSha("abc123", "my-token");
 
-    const fetchArgs = mockGetExecOutput.mock.calls[2][1] as string[];
+    const fetchArgs = getFetchArgs(2);
     expect(fetchArgs).toContain("-c");
 
-    const configArg = fetchArgs.find((arg: string) =>
+    const configArg = fetchArgs.find((arg) =>
       arg.startsWith("http.") && arg.includes(".extraheader="),
     );
     expect(configArg).toBeDefined();
@@ -93,8 +101,8 @@ describe("fetchBaseSha", () => {
 
     await fetchBaseSha("abc123", "my-token");
 
-    const fetchArgs = mockGetExecOutput.mock.calls[2][1] as string[];
-    const configArg = fetchArgs.find((arg: string) =>
+    const fetchArgs = getFetchArgs(2);
+    const configArg = fetchArgs.find((arg) =>
       arg.startsWith("http.") && arg.includes(".extraheader="),
     );
     expect(configArg).toMatch(/^http\.https:\/\/custom\.github\.example\.com/);
@@ -108,7 +116,7 @@ describe("fetchBaseSha", () => {
 
     await fetchBaseSha("abc123", "");
 
-    const fetchArgs = mockGetExecOutput.mock.calls[2][1] as string[];
+    const fetchArgs = getFetchArgs(2);
     expect(fetchArgs).not.toContain("-c");
     expect(fetchArgs).toEqual([
       "fetch",
@@ -127,7 +135,7 @@ describe("fetchBaseSha", () => {
 
     await fetchBaseSha("sha-xyz", "");
 
-    const fetchArgs = mockGetExecOutput.mock.calls[2][1] as string[];
+    const fetchArgs = getFetchArgs(2);
     expect(fetchArgs).toContain("--no-tags");
     expect(fetchArgs).toContain("origin");
     expect(fetchArgs).toContain("sha-xyz");

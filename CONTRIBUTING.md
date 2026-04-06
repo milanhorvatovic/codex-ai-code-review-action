@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for considering contributing to Codex Code Review Action!
+Thank you for considering contributing to Codex AI Code Review Action!
 
 ## Prerequisites
 
@@ -10,8 +10,8 @@ Thank you for considering contributing to Codex Code Review Action!
 ## Getting started
 
 ```bash
-git clone https://github.com/milanhorvatovic/codex-code-review-action.git
-cd codex-code-review-action
+git clone https://github.com/milanhorvatovic/codex-ai-code-review-action.git
+cd codex-ai-code-review-action
 npm install
 ```
 

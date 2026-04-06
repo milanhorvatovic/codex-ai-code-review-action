@@ -4,7 +4,7 @@ Review changes as a **senior TypeScript engineer** specializing in **GitHub Acti
 
 ## Project Context
 
-Codex Code Review Action is a GitHub Action that performs AI-powered code review using OpenAI Codex. It uses a two-job design with security isolation: a read-only review job (diff chunking, prompt assembly, structured findings) and a write-access publish job (inline PR comments, per-file summaries, verdict).
+Codex AI Code Review Action is a GitHub Action that performs AI-powered code review using OpenAI Codex. It uses a two-job design with security isolation: a read-only review job (diff chunking, prompt assembly, structured findings) and a write-access publish job (inline PR comments, per-file summaries, verdict).
 
 - Runtime: Node 22, TypeScript, bundled with esbuild (two entry points)
 - Dependencies: @actions/core, @actions/github, @actions/exec, @actions/artifact, openai

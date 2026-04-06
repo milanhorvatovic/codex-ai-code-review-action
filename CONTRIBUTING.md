@@ -64,7 +64,7 @@ New code should include tests. Aim to maintain or improve coverage.
 3. Rebuild dist: `npm run build`
 4. Commit and merge to `main`
 5. Tag and push the release: `git tag vx.y.z && git push origin vx.y.z`
-6. The release workflow automatically creates a GitHub Release, generates release notes, and updates the `v1` major version tag
+6. The release workflow automatically creates a GitHub Release, generates release notes, and updates the major version tag (e.g. `v1`)
 
 > **Tip:** You can also create the tag and release in one step using the GitHub CLI:
 >

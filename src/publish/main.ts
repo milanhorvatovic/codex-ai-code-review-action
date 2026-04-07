@@ -139,6 +139,7 @@ async function run(): Promise<void> {
   const effort = reviewOutput.effort || inputs.reviewEffort;
 
   let published = false;
+  let publishError: string | null = null;
   try {
     published = await publishReview({
       diffText,
@@ -151,9 +152,7 @@ async function run(): Promise<void> {
       runUrl,
     });
   } catch (error) {
-    core.setFailed(
-      `Failed to publish review: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    publishError = `Failed to publish review: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   core.setOutput("published", String(published));
@@ -182,7 +181,9 @@ async function run(): Promise<void> {
     }
   }
 
-  if (!published) {
+  if (publishError) {
+    core.setFailed(publishError);
+  } else if (!published) {
     core.setFailed("Failed to publish review. See warnings above for details.");
   }
 }

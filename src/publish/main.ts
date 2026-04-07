@@ -47,8 +47,8 @@ function parseChunkFile(filePath: string): ReviewOutput | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
-    core.warning(`Chunk file is not valid JSON: ${filePath}`);
+  } catch (error) {
+    core.warning(`Chunk file is not valid JSON: ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
   if (!isReviewOutput(parsed)) {
@@ -140,7 +140,7 @@ async function run(): Promise<void> {
     ? reviewOutput.model
     : inputs.model;
 
-  const effort = reviewOutput.effort || inputs.reviewEffort;
+  const effort = reviewOutput.effort?.trim() || inputs.reviewEffort.trim();
 
   let published = false;
   let publishError: string | null = null;

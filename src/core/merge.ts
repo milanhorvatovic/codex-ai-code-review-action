@@ -52,8 +52,9 @@ export function mergeChunkReviews(
       lowestConfidence = chunk.overall_confidence_score;
     }
 
-    if (effort === null && chunk.effort !== null) {
-      effort = chunk.effort;
+    const trimmedEffort = chunk.effort?.trim() || null;
+    if (effort === null && trimmedEffort !== null) {
+      effort = trimmedEffort;
     }
 
     if (model === "unknown" && chunk.model !== "") {

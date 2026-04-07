@@ -1,5 +1,5 @@
 name: "Codex Review — Publish"
-description: "Merge chunk reviews and publish as a GitHub PR review with inline comments. Requires .codex/ artifacts from the prepare and review steps."
+description: "Merge chunk reviews and publish as a GitHub PR review with inline comments. Requires .codex/ artifacts from the prepare and review steps. Artifacts must be downloaded with merge-multiple: true so chunk outputs land directly under .codex/."
 
 branding:
   color: "green"

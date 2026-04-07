@@ -68,7 +68,7 @@ async function run(): Promise<void> {
 
     if (chunkFiles.length === 0) {
       core.setFailed(
-        `No chunk review outputs found in ${CODEX_DIR}/. Ensure the review step ran successfully and artifacts were downloaded.`,
+        `No chunk review outputs found in ${CODEX_DIR}. Ensure the review step ran successfully and artifacts were downloaded.`,
       );
       return;
     }

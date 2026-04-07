@@ -74,10 +74,12 @@ async function run(): Promise<void> {
     }
 
     const chunkResults: ReviewOutput[] = [];
+    const mergedIndices = new Set<number>();
     for (const chunk of chunkFiles) {
       const result = parseChunkFile(chunk.path);
       if (result) {
         chunkResults.push(result);
+        mergedIndices.add(chunk.index);
         core.info(`Parsed chunk ${chunk.index}: ${result.findings.length} finding(s)`);
       }
     }
@@ -87,18 +89,20 @@ async function run(): Promise<void> {
       return;
     }
 
-    if (inputs.expectedChunks !== null && chunkResults.length < inputs.expectedChunks) {
-      const missing = inputs.expectedChunks - chunkResults.length;
-      const invalid = chunkFiles.length - chunkResults.length;
-      const parts = [`Expected ${inputs.expectedChunks} chunk(s) but merged ${chunkResults.length}.`];
-      if (invalid > 0) {
-        parts.push(`${invalid} chunk(s) failed validation.`);
+    if (inputs.expectedChunks !== null && inputs.expectedChunks > 0) {
+      const missingIndices: number[] = [];
+      for (let i = 0; i < inputs.expectedChunks; i++) {
+        if (!mergedIndices.has(i)) {
+          missingIndices.push(i);
+        }
       }
-      if (missing - invalid > 0) {
-        parts.push(`${missing - invalid} chunk(s) were not produced.`);
+
+      if (missingIndices.length > 0) {
+        const parts = [`Expected ${inputs.expectedChunks} chunk(s) but merged ${chunkResults.length}.`];
+        parts.push(`Missing chunk(s): ${missingIndices.join(", ")}.`);
+        parts.push("Proceeding with partial review.");
+        core.warning(parts.join(" "));
       }
-      parts.push("Proceeding with partial review.");
-      core.warning(parts.join(" "));
     }
 
     reviewOutput = mergeChunkReviews(chunkResults);

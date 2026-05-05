@@ -10,7 +10,7 @@ import { assemblePrompt } from "../core/prompt.js";
 import { ExcludePathsError, parseExcludePaths } from "./excludePaths.js";
 import {
   ReviewReferenceFileError,
-  resolveReviewReferenceContent,
+  resolveReviewReferenceFromWorkspace,
 } from "./referenceFile.js";
 import { getPullRequestContext } from "../github/context.js";
 import { buildDiff, fetchBaseSha } from "../github/git.js";
@@ -91,7 +91,7 @@ async function run(): Promise<void> {
   let referenceContent = defaultReference;
   if (referenceFilePath) {
     try {
-      referenceContent = resolveReviewReferenceContent(
+      referenceContent = resolveReviewReferenceFromWorkspace(
         referenceFilePath,
         process.env.GITHUB_WORKSPACE ?? process.cwd(),
       );

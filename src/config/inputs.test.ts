@@ -29,6 +29,7 @@ describe("getPrepareInputs", () => {
         "github-token": "ghp-token",
         "max-chunk-bytes": "100000",
         "review-reference-file": ".github/codex/reference.md",
+        "review-reference-source": "base",
       };
       return inputs[name] ?? "";
     });
@@ -40,6 +41,33 @@ describe("getPrepareInputs", () => {
     expect(result.excludePathsRaw).toBe("dist/**\n*.lock");
     expect(result.maxChunkBytes).toBe(100000);
     expect(result.reviewReferenceFile).toBe(".github/codex/reference.md");
+    expect(result.reviewReferenceSource).toBe("base");
+  });
+
+  it("defaults review-reference-source to 'workspace' when omitted", () => {
+    mockGetInput.mockImplementation(() => "");
+
+    const result = getPrepareInputs();
+    expect(result.reviewReferenceSource).toBe("workspace");
+  });
+
+  it("accepts 'workspace' as the explicit review-reference-source", () => {
+    mockGetInput.mockImplementation((name: string) =>
+      name === "review-reference-source" ? "workspace" : "",
+    );
+
+    const result = getPrepareInputs();
+    expect(result.reviewReferenceSource).toBe("workspace");
+  });
+
+  it("rejects review-reference-source values other than 'workspace' or 'base'", () => {
+    mockGetInput.mockImplementation((name: string) =>
+      name === "review-reference-source" ? "head" : "",
+    );
+
+    expect(() => getPrepareInputs()).toThrow(
+      "Input 'review-reference-source' must be 'workspace' or 'base' (got 'head').",
+    );
   });
 
   it("masks the GitHub token", () => {

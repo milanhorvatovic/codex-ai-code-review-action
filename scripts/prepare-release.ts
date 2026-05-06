@@ -628,7 +628,7 @@ export function parseGitRemoteUrl(
 // boxes) still fires regardless, so real sign-off on an older template is
 // still preserved.
 export const SIGNOFF_TEMPLATE_VERSION_MARKER =
-  "<!-- release-gate-template-version:v2 -->";
+  "<!-- release-gate-template-version:v3 -->";
 
 export function buildSignoffSection(gateDocUrl: string = resolveGateDocUrl()): string {
   const lines: string[] = [

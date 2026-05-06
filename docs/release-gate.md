@@ -102,7 +102,7 @@ Every line in this gate ends in one of two states:
 
 Acceptance bars:
 
-- **Before tagging.** Every pre-merge gate item (Required validation, Dist reproducibility, Manual security regression checks, Conditional base-mode checks, Release-specific items, Security-review-required cross-reference, Security-review sign-off) is verified or waived; every waiver names its follow-up; the maintainer cutting the tag has signed off on the rollup.
+- **Before tagging.** Every pre-merge gate item (Required validation, Dist reproducibility, Manual security regression checks, Base-mode regression checks, Release-specific items, Security-review-required cross-reference, Security-review sign-off) is verified or waived; every waiver names its follow-up; the maintainer cutting the tag has signed off on the rollup.
 - **After tagging.** The post-tag item ([Archiving the gate](#archiving-the-gate)) is verified once `release.yaml` has created the GitHub Release and the evidence zip has been uploaded. The release is not considered complete until this final item is signed off in the release PR thread or evidence record.
 
 ## Security-review-required cross-reference

@@ -81,6 +81,7 @@ vi.mock("../core/allowlist.js", () => ({
 
 const defaultInputs = {
   allowedUsers: "*",
+  excludePathsRaw: "",
   githubToken: "token",
   maxChunkBytes: 200000,
   reviewReferenceFile: "",
@@ -271,6 +272,55 @@ describe("prepare/main error handling", () => {
       "Invalid review-reference-file: path '/etc/passwd' must be workspace-relative, not absolute",
     );
     expect(mockAssemblePrompt).not.toHaveBeenCalled();
+  });
+
+  it("passes parsed excludePaths through to buildDiff", async () => {
+    mockGetPrepareInputs.mockReturnValue({
+      ...defaultInputs,
+      excludePathsRaw: "dist/**\n*.lock",
+    });
+    mockFetchBaseSha.mockResolvedValueOnce(undefined);
+    mockBuildDiff.mockResolvedValueOnce("diff content");
+    mockSplitDiff.mockReturnValueOnce(["chunk0"]);
+
+    await import("./main.js");
+    await vi.waitFor(() => {
+      expect(mockBuildDiff).toHaveBeenCalled();
+    });
+
+    expect(mockBuildDiff).toHaveBeenCalledWith("base123", "head456", [
+      "dist/**",
+      "*.lock",
+    ]);
+  });
+
+  it("passes an empty excludePaths array when input is empty", async () => {
+    mockFetchBaseSha.mockResolvedValueOnce(undefined);
+    mockBuildDiff.mockResolvedValueOnce("diff content");
+    mockSplitDiff.mockReturnValueOnce(["chunk0"]);
+
+    await import("./main.js");
+    await vi.waitFor(() => {
+      expect(mockBuildDiff).toHaveBeenCalled();
+    });
+
+    expect(mockBuildDiff).toHaveBeenCalledWith("base123", "head456", []);
+  });
+
+  it("calls setFailed with the Invalid exclude-paths prefix when parsing rejects an entry", async () => {
+    mockGetPrepareInputs.mockReturnValue({
+      ...defaultInputs,
+      excludePathsRaw: ":(exclude)dist/**",
+    });
+
+    await import("./main.js");
+    await vi.waitFor(() => {
+      expect(mockSetFailed).toHaveBeenCalled();
+    });
+
+    const message = mockSetFailed.mock.calls[0]?.[0];
+    expect(message).toMatch(/^Invalid exclude-paths: /);
+    expect(mockBuildDiff).not.toHaveBeenCalled();
   });
 
   it("re-throws non-ReviewReferenceFileError exceptions from the resolver", async () => {

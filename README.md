@@ -217,10 +217,13 @@ jobs:
           persist-credentials: false
 
       - id: prepare
-        # SHA corresponds to tag v2.1.0-rc.1 — update when adopting a new release.
         uses: milanhorvatovic/codex-ai-code-review-action/prepare@357e3f341a63345c381ad390ed2afa9aa2c366d5 # v2.1.0-rc.1
         with:
           allow-users: alice,bob,charlie # replace with real GitHub usernames; an empty value allows everyone
+          # Add one pattern per line. Other common entries: yarn.lock, pnpm-lock.yaml, vendor/**.
+          exclude-paths: |
+            dist/**
+            package-lock.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.prepare.outputs.skipped != 'true' && steps.prepare.outputs.has-changes == 'true'
@@ -282,6 +285,8 @@ jobs:
           fail-on-missing-chunks: "true" # explicit for auditors (consumer-controls.md item 8)
 ```
 
+> **`exclude-paths` keeps generated artifacts out of the diff before chunking.** The example above excludes `dist/**` (a bundled artifact rebuilt on most src-touching PRs) and `package-lock.json` (mechanical resolver output where AI review adds little signal — manifest-vs-lockfile drift is typically caught by `npm ci` in CI or by a structural version-sync check, not by reading the diff). The patterns are git pathspec syntax, not gitignore — `*` matches any character including `/`, and there is no `!` negation. Unmatched patterns silently no-op (you do not need to remove an entry just because a particular PR did not touch it). Adapt to your stack: yarn repos use `yarn.lock`, pnpm repos use `pnpm-lock.yaml`, vendored-deps repos add `vendor/**`. This is a token-cost knob, not a security control — it does not replace `paths-ignore:` at the trigger level or the same-repo gate from the `if:` lines, which control whether the workflow runs at all. See [Consumer controls — item 10](docs/consumer-controls.md#10-optional-tune-exclude-paths-for-token-cost-not-as-a-security-control) for the validation rules and the cap rationale.
+
 > **`review-reference-file` is PR-controlled in workspace mode.** Two separate guarantees apply, and they are not the same thing:
 >
 > - **Workspace-safety constraints (always on).** The prepare step rejects empty values, absolute paths, NUL/backslash, traversal, paths that resolve through a symlink leaf or ancestor, non-regular files, the runner's `.git` directory, and files over 64 KiB before any read. See [Constraints on `review-reference-file`](#constraints-on-review-reference-file). These constraints close file-disclosure attacks (a PR cannot point the input at `/proc/self/environ` or a runner-local secret).
@@ -322,6 +327,7 @@ upload artifacts ────────── ▶                             
 |-------|----------|---------|-------------|
 | `github-token` | No | `github.token` | GitHub token for fetching PR base commit |
 | `allow-users` | No | all users | Comma-separated list of GitHub usernames who can run this action |
+| `exclude-paths` | No | _(empty)_ | Newline-separated globs to exclude from the PR diff before chunking. Each entry is forwarded to `git diff` as a `:(exclude)<glob>` pathspec; unmatched patterns no-op silently. Capped at 64 entries; `..`, absolute paths, backslashes, NUL bytes, and `:`-prefixed entries are rejected. See [Consumer controls — item 10](docs/consumer-controls.md#10-optional-tune-exclude-paths-for-token-cost-not-as-a-security-control). |
 | `review-reference-file` | No | built-in | Workspace-relative path to a custom review reference (regular file, no symlinks, ≤ 64 KiB). See [Customizing review rules per repository](#customizing-review-rules-per-repository). |
 | `max-chunk-bytes` | No | `204800` | Target max bytes per diff chunk (splits at file boundaries) |
 
@@ -577,7 +583,7 @@ The wrapper threads four `prepare` outputs (`skipped`, `has-changes`, `chunk-cou
 
 The example above only exposes the OpenAI API key via `workflow_call.secrets`. The wrapper is the org's policy boundary, so the default surface is deliberately tiny — every input exposed becomes a policy decision the wrapper has to enforce. Use these categories when deciding whether to add an input:
 
-- **Safe to expose for product repos.** Operational tuning that does not change trust boundaries: `allow-users`, `max-chunk-bytes`, `min-confidence`, `max-comments`, `model`, `effort`, `review-effort`. Add these to `on.workflow_call.inputs:` and thread them into the matching `with:` blocks.
+- **Safe to expose for product repos.** Operational tuning that does not change trust boundaries: `allow-users`, `exclude-paths`, `max-chunk-bytes`, `min-confidence`, `max-comments`, `model`, `effort`, `review-effort`. Add these to `on.workflow_call.inputs:` and thread them into the matching `with:` blocks. `exclude-paths` is a token-cost optimization (skips generated artifacts from the diff before chunking); the prepare action validates each entry and rejects pathspec magic before `git diff` runs, so a misuse from a product repo fails closed rather than silently expanding the review surface.
 - **Defer until `review-reference-source: base` ships.** Reference-policy knobs decide what the model treats as review policy. Today the only one available is `review-reference-file`, and in workspace mode the policy file is read from the PR head — so exposing it through the wrapper lets any same-repo PR in a product repo edit the policy and steer the prompt (see [the production-example callout above](#production-workflow-example)). The opt-in `review-reference-source: base` mode that pins policy to the base SHA is tracked in [issue #97](https://github.com/milanhorvatovic/codex-ai-code-review-action/issues/97) and is not yet available. Until it lands, do not expose `review-reference-file` from the wrapper without an explicit trust decision; once #97 ships, expose both inputs together and set `review-reference-source: base` in the wrapper's defaults. That pins the *source* of the policy file to the consumer repo's base SHA, so an in-flight PR can no longer edit `.github/codex/review-reference.md` and have those edits apply to its own review. Note: policy *content* still lives in the consumer repo and is controlled by whoever can land changes to base — base mode protects against in-PR edits, not against trusted maintainers merging policy changes through normal review. The wrapper centralizes the mode choice (product repos cannot opt back to workspace), not the policy text.
 - **Do not expose by default.** Data-destination and retention knobs (`retain-findings`, `retain-findings-days`), permission scoping, the OpenAI key surface beyond the existing `workflow_call.secrets.openai-api-key`, and the same-repo / draft / fork gates. These belong to the wrapper repo's centralized policy; exposing them lets product repos opt out of the controls the wrapper exists to enforce.
 

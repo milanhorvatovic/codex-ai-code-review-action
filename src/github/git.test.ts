@@ -167,4 +167,37 @@ describe("buildDiff", () => {
 
     expect(result).toBe("");
   });
+
+  it("omits pathspec args when excludePaths is empty", async () => {
+    mockGetExecOutput.mockResolvedValueOnce({ exitCode: 0, stderr: "", stdout: "" });
+
+    await buildDiff("base", "head", []);
+
+    expect(mockGetExecOutput).toHaveBeenCalledWith(
+      "git",
+      ["diff", "--no-color", "--unified=3", "base...head"],
+      { silent: true },
+    );
+  });
+
+  it("appends '-- . :(exclude)<pattern>' for each excludePaths entry", async () => {
+    mockGetExecOutput.mockResolvedValueOnce({ exitCode: 0, stderr: "", stdout: "" });
+
+    await buildDiff("base", "head", ["dist/**", "*.lock"]);
+
+    expect(mockGetExecOutput).toHaveBeenCalledWith(
+      "git",
+      [
+        "diff",
+        "--no-color",
+        "--unified=3",
+        "base...head",
+        "--",
+        ".",
+        ":(exclude)dist/**",
+        ":(exclude)*.lock",
+      ],
+      { silent: true },
+    );
+  });
 });

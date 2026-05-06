@@ -42,6 +42,7 @@ export interface NormalizedFinding {
 
 export interface PrepareInputs {
   allowedUsers: string;
+  excludePathsRaw: string;
   githubToken: string;
   maxChunkBytes: number;
   reviewReferenceFile: string;

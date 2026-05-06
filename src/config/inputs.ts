@@ -20,6 +20,7 @@ export function getPrepareInputs(): PrepareInputs {
 
   return {
     allowedUsers: core.getInput("allow-users"),
+    excludePathsRaw: core.getInput("exclude-paths"),
     githubToken,
     maxChunkBytes,
     reviewReferenceFile: core.getInput("review-reference-file"),

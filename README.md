@@ -425,7 +425,7 @@ The path is resolved against the runner's checked-out workspace. To close off fi
 
 #### Base-mode rules
 
-The path is read from the PR base SHA via `git ls-tree --literal-pathspecs` (to get the tree entry mode) and `git cat-file blob` (for the blob content). The file is never resolved against the runner filesystem, so workspace symlinks cannot point the read at runner-local secrets, and `--literal-pathspecs` ensures filenames containing pathspec metacharacters resolve to the exact validated path rather than a glob match. The prepare step rejects:
+The path is read from the PR base SHA via `git --literal-pathspecs ls-tree` (to get the tree entry mode) and `git cat-file blob` (for the blob content). The `--literal-pathspecs` flag is a git global option, so it must precede the subcommand — the implementation invokes git as `git --literal-pathspecs ls-tree -z --full-tree <sha> -- <path>`. The file is never resolved against the runner filesystem, so workspace symlinks cannot point the read at runner-local secrets, and `--literal-pathspecs` ensures filenames containing pathspec metacharacters resolve to the exact validated path rather than a glob match. The prepare step rejects:
 
 - tracked symbolic links (git mode `120000`) — the git form does not follow filesystem symlinks, but returning the link target string as policy would be a footgun;
 - non-regular-file modes (notably submodules, mode `160000`);

@@ -137,6 +137,39 @@ The rule has two strict halves:
 
 **How to apply:** see [Customizing review rules per repository](../README.md#customizing-review-rules-per-repository) and [Constraints on `review-reference-file`](../README.md#constraints-on-review-reference-file) for the workspace-safety constraints in force today, and the callout in the [Production workflow example](../README.md#production-workflow-example) for the workspace-mode tamper-resistance gap. For wrappers, [Extending the wrapper's input surface](../README.md#extending-the-wrappers-input-surface) is the canonical reference.
 
+### 10. Optional: tune `exclude-paths` for token cost, not as a security control
+
+> **Owner:** Optional; consumer responsibility when used.
+
+`exclude-paths` is the only item in this checklist that is genuinely optional — every other item is a hard constraint. It is included here so an auditor reading the workflow file in one pass has a single document that explains what every prepare-step input does, why it is wired the way it is, and what the validation guarantees are. Skip this item entirely if your workflow does not set `exclude-paths`; the empty default preserves the original behavior of reviewing every file in the diff.
+
+**What it does.** When the consumer sets `exclude-paths`, the prepare step forwards each entry to `git diff` as a `:(exclude)<glob>` pathspec. The resulting diff omits files matching any entry before chunking, which means OpenAI tokens are not spent on generated artifacts (`dist/`, `vendor/`), lockfiles, or other content that has no review value. Unmatched entries silently no-op; an entry like `dist/**` does not need to be removed when a particular PR did not touch `dist/`.
+
+**This is a cost optimization, not a security control.** Three things this input does **not** do:
+
+1. It does not gate which workflow runs trigger. That is `on.pull_request.paths-ignore:` at the trigger level (covered by item 2's choice of trigger) plus the same-repo gate from item 3. A workflow that runs on a fork PR or a draft is not protected by `exclude-paths` — the workflow already started by the time `prepare` parses inputs.
+2. It does not constrain who can trigger reviews. That is `allow-users` (set on `prepare`).
+3. It does not affect what the model treats as policy or what files it reviews semantically. The model only sees the diff after exclusions, but the review-rule policy comes from `review-reference-file` (item 9) and the action's built-in default.
+
+If you need to skip whole runs, use `paths-ignore:` at the trigger level — the workflow does not start, no compute is spent, and `allow-users` enforcement is moot. Use `exclude-paths` only when the workflow *should* run (the PR also touches reviewable code) and you want to drop a subset of the diff from review.
+
+**Validation rules — the action fails closed.** When `exclude-paths` is set, every entry is validated before `git diff` runs. The action fails the entire run with `Invalid exclude-paths: <reason>` if any of the following are true:
+
+- An entry contains a NUL byte.
+- An entry contains a backslash (`\`). Use POSIX separators only.
+- An entry starts with `:`. The leading colon is git pathspec magic, and the action prepends `:(exclude)` itself; allowing consumer-supplied magic prefixes would let a misuse swap exclusion for inclusion or change pathspec scope.
+- An entry starts with `/` (absolute path).
+- An entry contains a `..` segment (anywhere — `../foo`, `foo/../bar`, etc.).
+- More than 64 entries are provided.
+
+Empty input and whitespace-only input are treated as if the input was not provided at all — no pathspec args are appended, current behavior is preserved. Blank lines and CR characters from CRLF line endings are dropped silently per entry. So a single trailing newline or a Windows-style file with `\r\n` endings does not require special handling.
+
+**Why the 64-entry cap.** The cap is a defensive bound, not a hard performance constraint. Real-world artifact-exclusion lists fit well inside 64 entries (`dist/**`, `vendor/**`, `*.lock`, `build/**`, `generated/**`, plus a handful of extension globs covers most repositories). If you need more, the underlying problem is usually solved better by a different design — a file-extension allowlist, a separate review scope per directory, or a wrapper that splits the workflow into multiple `prepare` invocations. The cap also prevents accidental misuse where a consumer pipes a file list (`find dist -type f`) into the input, which would balloon the `git diff` command line and obscure the intent.
+
+**Wrapper-safe.** Unlike `review-reference-file` (item 9), `exclude-paths` is wrapper-safe and listed under "Safe to expose for product repos" in [Extending the wrapper's input surface](../README.md#extending-the-wrappers-input-surface). A same-repo PR author who edits the wrapper consumer's `exclude-paths` value can only narrow the diff sent to OpenAI; the validation rules above prevent broadening, escape, or pathspec-magic abuse. The action's safety guarantees (key isolation, write-permission split, allowlist enforcement) do not depend on which files appear in the diff.
+
+**How to apply:** see the [Production workflow example](../README.md#production-workflow-example) for an `exclude-paths: |\n  dist/**\n  *.lock` snippet, and the [Prepare action inputs](../README.md#prepare-action-inputs) table for the input definition.
+
 ## Why fork PRs are skipped
 
 Two technical reasons drive the same-repo gate from item 3:
@@ -165,7 +198,7 @@ The fork-and-wrap adoption path documented in [Adopting in enterprise environmen
 - A company fork **does not replace SHA pinning.** The fork still references composite-action `uses:` lines internally, and those references must be pinned to immutable SHAs inside the fork — including the transitive `openai/codex-action` pin. Forking moves the trust dependency from the upstream maintainer account to the fork's maintainers, but it does not eliminate the SHA-pinning discipline.
 - The `allow-users` allowlist **does not replace fork gating.** `allow-users` controls *who* may trigger the prepare step among same-repo PR authors; the same-repo gate from item 3 controls *which PRs* the workflow runs on at all. A workflow with `allow-users` set but without the same-repo gate still runs on fork PRs (and fails noisily, see above). Both controls are required.
 
-Wrapper consumers calling the org-internal reusable workflow inherit items 2, 3, 4, 5, 6, 7, 8, and the wrapper-side half of item 9 from the wrapper's own workflow definition. Item 1, plus the direct-consumer half of item 9, remains the wrapper maintainer's responsibility.
+Wrapper consumers calling the org-internal reusable workflow inherit items 2, 3, 4, 5, 6, 7, 8, and the wrapper-side half of item 9 from the wrapper's own workflow definition. Item 1, plus the direct-consumer half of item 9, remains the wrapper maintainer's responsibility. Item 10 is optional in either model; product repos may set `exclude-paths` directly on the wrapper invocation when the wrapper exposes that input as a `workflow_call` parameter.
 
 ## Audit summary
 

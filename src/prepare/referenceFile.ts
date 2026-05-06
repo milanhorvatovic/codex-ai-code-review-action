@@ -117,27 +117,21 @@ export async function resolveReviewReferenceFromBase(
   input: string,
   baseSha: string,
 ): Promise<string> {
-  const normalized = validateReviewReferencePath(input);
   if (baseSha.trim() === "") {
     throw new ReviewReferenceFileError("base SHA is empty");
   }
-
+  const normalized = validateReviewReferencePath(input);
   const trimmed = input.trim();
   const info = await statPathAtSha(baseSha, normalized);
 
-  if (info.type !== "blob") {
-    throw new ReviewReferenceFileError(
-      `path '${trimmed}' has unsupported git mode ${info.mode} at base SHA; expected a regular file`,
-    );
-  }
   if (info.mode === "120000") {
     throw new ReviewReferenceFileError(
       `path '${trimmed}' is a symbolic link at base SHA; symlinks are not allowed`,
     );
   }
-  if (info.mode !== "100644" && info.mode !== "100755") {
+  if (info.type !== "blob" || (info.mode !== "100644" && info.mode !== "100755")) {
     throw new ReviewReferenceFileError(
-      `path '${trimmed}' has unsupported git mode ${info.mode}; expected a regular file`,
+      `path '${trimmed}' has unsupported git mode ${info.mode} at base SHA; expected a regular file`,
     );
   }
   if (info.sizeBytes > REFERENCE_MAX_BYTES) {

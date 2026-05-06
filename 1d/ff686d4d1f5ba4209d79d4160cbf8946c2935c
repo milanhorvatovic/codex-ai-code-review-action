@@ -1,0 +1,26 @@
+.github/workflows/verify-release.yaml
+  s_6207b93bf9bf83::t_99aaca414898df 25-31,35,40
+CONTRIBUTING.md
+  s_6207b93bf9bf83::t_78ac70bc8965e7 211
+docs/release-gate.md
+  s_6207b93bf9bf83::t_6c34e4c48b5b0c 26
+.github/SECURITY.md
+  s_6207b93bf9bf83::t_6c34e4c48b5b0c 133
+  s_6207b93bf9bf83::t_78ac70bc8965e7 137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "1dff686d4d1f5ba4209d79d4160cbf8946c2935c",
+  "prompts": {},
+  "sessions": {
+    "s_6207b93bf9bf83": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dff48-9ec1-7d31-8aeb-0ee42e355db0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

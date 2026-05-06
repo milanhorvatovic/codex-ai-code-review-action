@@ -1,0 +1,27 @@
+.github/actions/setup-node-deps/action.yaml
+  s_6207b93bf9bf83::t_38a9abc7a38e15 4-9,16,21
+.github/actions/verify-release/action.yaml
+  s_6207b93bf9bf83::t_38a9abc7a38e15 8-11,18,28-30,41-67
+  s_6207b93bf9bf83::t_7f67454eeb272a 27
+.github/actions/verify-dist/action.yaml
+  s_6207b93bf9bf83::t_38a9abc7a38e15 4-9,16,23,34
+.github/actions/verify-lockfile-version/action.yaml
+  s_6207b93bf9bf83::t_b004be5cc528af 14
+  s_6207b93bf9bf83::t_38a9abc7a38e15 4-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "b273869d82db8f2f3884142d557dca4d8e1b8742",
+  "prompts": {},
+  "sessions": {
+    "s_6207b93bf9bf83": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dff48-9ec1-7d31-8aeb-0ee42e355db0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

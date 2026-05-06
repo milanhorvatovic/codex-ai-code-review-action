@@ -16,7 +16,7 @@ export function parseExcludePaths(raw: string): string[] {
   const lines = raw.split("\n");
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const line = lines[lineIndex] ?? "";
-    const cleaned = line.replace(/\r/g, "").trim();
+    const cleaned = line.replace(/\r$/, "").trim();
     if (cleaned === "") {
       continue;
     }

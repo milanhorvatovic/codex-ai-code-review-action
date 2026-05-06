@@ -12,7 +12,7 @@ inputs:
     default: ""
 
   exclude-paths:
-    description: "Newline-separated list of glob paths to exclude from the PR diff before chunking. Uses git pathspec syntax (the action prepends ':(exclude)' to each entry). Empty = include everything. Common values: dist/**, vendor/**, *.lock. Capped at 64 entries; entries must not be absolute, contain '..' segments, contain backslashes or NUL bytes, or start with ':' (pathspec magic is reserved). Invalid entries fail the action with 'Invalid exclude-paths: <reason>' before git diff runs."
+    description: "Newline-separated list of glob paths to exclude from the PR diff before chunking. Uses git pathspec syntax (the action prepends ':(exclude)' to each entry). Empty = include everything. Common values: dist/**, vendor/**, package-lock.json (or yarn.lock / pnpm-lock.yaml depending on package manager). Capped at 64 entries; entries must not be absolute, contain '..' segments, contain backslashes or NUL bytes, or start with ':' (pathspec magic is reserved). Invalid entries fail the action with 'Invalid exclude-paths: <reason>' before git diff runs."
     required: false
     default: ""
 

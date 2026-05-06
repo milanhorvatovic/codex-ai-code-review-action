@@ -48,6 +48,14 @@ describe("parseExcludePaths", () => {
       ]);
     });
 
+    it("only strips trailing CR; preserves mid-line CR (lossless parsing)", () => {
+      // POSIX paths technically allow CR in filenames. The parser must not
+      // silently corrupt them by stripping all CR globally — only trailing CR
+      // from CRLF line endings should be removed.
+      const result = parseExcludePaths("foo\rbar\nbaz/**");
+      expect(result).toEqual(["foo\rbar", "baz/**"]);
+    });
+
     it("drops blank lines silently between entries", () => {
       expect(parseExcludePaths("dist/**\n\n\nvendor/**\n   \n*.lock")).toEqual([
         "dist/**",

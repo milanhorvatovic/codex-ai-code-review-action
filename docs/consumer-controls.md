@@ -173,7 +173,7 @@ Empty input and whitespace-only input are treated as if the input was not provid
 
 #### Why the 64-entry cap
 
-The cap is a defensive bound, not a hard performance constraint. Real-world artifact-exclusion lists fit well inside 64 entries (`dist/**`, `vendor/**`, lockfile literals, `build/**`, `generated/**`, plus a handful of extension globs covers most repositories). The cap prevents accidental misuse — e.g. a consumer piping a file list (`find dist -type f`) into the input, which would balloon the `git diff` command line and obscure intent. If you legitimately need more, the underlying problem is usually solved better by a different design: a file-extension allowlist, a separate review scope per directory, or a wrapper that splits the workflow into multiple `prepare` invocations.
+The cap is a defensive bound, not a hard performance constraint. Real-world artifact-exclusion lists fit well inside 64 entries (`dist/**`, `vendor/**`, `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml`, `build/**`, `generated/**`, plus a handful of extension globs covers most repositories). The cap prevents accidental misuse — e.g. a consumer piping a file list (`find dist -type f`) into the input, which would balloon the `git diff` command line and obscure intent. If you legitimately need more, the underlying problem is usually solved better by a different design: a file-extension allowlist, a separate review scope per directory, or a wrapper that splits the workflow into multiple `prepare` invocations.
 
 #### Wrapper-safety
 

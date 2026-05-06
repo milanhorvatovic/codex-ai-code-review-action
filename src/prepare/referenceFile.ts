@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { readBlobBySha, statPathAtSha } from "../github/git.js";
+
 export const REFERENCE_MAX_BYTES = 64 * 1024;
 
 export class ReviewReferenceFileError extends Error {
@@ -10,7 +12,7 @@ export class ReviewReferenceFileError extends Error {
   }
 }
 
-export function resolveReviewReferenceContent(input: string, cwd: string): string {
+export function validateReviewReferencePath(input: string): string {
   const trimmed = input.trim();
   if (trimmed === "") {
     throw new ReviewReferenceFileError("path is empty");
@@ -46,6 +48,13 @@ export function resolveReviewReferenceContent(input: string, cwd: string): strin
       `path '${trimmed}' targets the .git directory; reading runner-managed git state is not allowed`,
     );
   }
+
+  return normalized;
+}
+
+export function resolveReviewReferenceFromWorkspace(input: string, cwd: string): string {
+  const normalized = validateReviewReferencePath(input);
+  const trimmed = input.trim();
 
   let realCwd: string;
   try {
@@ -102,6 +111,36 @@ export function resolveReviewReferenceContent(input: string, cwd: string): strin
   }
 
   return fs.readFileSync(current, "utf8");
+}
+
+export async function resolveReviewReferenceFromBase(
+  input: string,
+  baseSha: string,
+): Promise<string> {
+  if (baseSha.trim() === "") {
+    throw new ReviewReferenceFileError("base SHA is empty");
+  }
+  const normalized = validateReviewReferencePath(input);
+  const trimmed = input.trim();
+  const info = await statPathAtSha(baseSha, normalized);
+
+  if (info.mode === "120000") {
+    throw new ReviewReferenceFileError(
+      `path '${trimmed}' is a symbolic link at base SHA; symlinks are not allowed`,
+    );
+  }
+  if (info.type !== "blob" || (info.mode !== "100644" && info.mode !== "100755")) {
+    throw new ReviewReferenceFileError(
+      `path '${trimmed}' has unsupported git mode ${info.mode} at base SHA; expected a regular file`,
+    );
+  }
+  if (info.sizeBytes > REFERENCE_MAX_BYTES) {
+    throw new ReviewReferenceFileError(
+      `file '${trimmed}' is ${info.sizeBytes} bytes at base SHA, exceeds ${REFERENCE_MAX_BYTES}-byte limit`,
+    );
+  }
+
+  return readBlobBySha(info.objectId);
 }
 
 function describeError(error: unknown): string {

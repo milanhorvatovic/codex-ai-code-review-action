@@ -9,13 +9,22 @@ name: Codex code review (dogfood)
 # and `retain-findings` are quoted explicitly to match the auditor-visible
 # pattern documented in docs/consumer-controls.md items 7 and 8.
 #
-# Two patterns are excluded from review on this dogfood:
+# Two patterns are excluded from review on this dogfood, by deliberate
+# dual-layer design — paths-ignore at the trigger and exclude-paths at the
+# prepare step are kept together permanently because they target distinct
+# cases and neither subsumes the other:
 #
-#   - dist/** — bundled artifact rebuilt on most src-touching PRs. Excluded
-#     at two layers during the exclude-paths rollout: paths-ignore on the
-#     trigger keeps the workflow from running on dist-only PRs at all, and
-#     exclude-paths on the prepare step drops dist/** from the diff before
-#     chunking on mixed PRs that touch both src and dist.
+#   - dist/** — bundled artifact rebuilt on most src-touching PRs.
+#     paths-ignore (trigger layer) skips workflow scheduling on dist-only
+#     PRs, saving runner minutes and queue slots before any prepare-step
+#     code runs. Empirically zero hits in this repo's PR history but
+#     cheap defense-in-depth against future automation that might produce
+#     dist-only PRs (auto-rebuild workflows, corrective rebuilds,
+#     tooling-generated commits). exclude-paths (diff layer) drops
+#     dist/** from the diff before chunking on the actually-common
+#     mixed-PR case — this is where the real token savings come from
+#     (~63% of dogfood-era OpenAI input tokens, dominated by review of
+#     bundled JS in dist/prepare/main.js).
 #
 #   - package-lock.json — lockfile diffs on manual dep bumps are mechanical
 #     resolver output where AI review value is low. Manifest-vs-lockfile
@@ -25,14 +34,14 @@ name: Codex code review (dogfood)
 #
 # Until the next release ships and scripts/refresh-self-pins.ts bumps the
 # pinned SHA below to a commit that recognizes the exclude-paths input,
-# both exclude-paths entries are no-ops (the pinned SHA emits an
+# the exclude-paths entries are no-ops (the pinned SHA emits an
 # "Unexpected input(s)" warning and ignores the value, same shape as the
 # v2.1.0 fail-on-missing-chunks rollout in consumer-controls.md item 8).
-# In that window paths-ignore carries the dist/** mitigation alone, and
-# manual dep bumps still consume tokens on the lockfile diff — both clear
-# up after the SHA refresh, at which point paths-ignore can also be
-# dropped because exclude-paths covers mixed PRs and pure-dist PRs become
-# an empty diff after exclusion. See issue #106.
+# In that transition window paths-ignore carries the dist/** mitigation
+# alone, and manual dep bumps still consume tokens on the lockfile diff;
+# both clear up once the SHA refresh lands. paths-ignore stays in place
+# after the refresh as the trigger-layer half of the permanent design.
+# See issue #106.
 
 on:
   pull_request:

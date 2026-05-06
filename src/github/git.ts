@@ -65,10 +65,8 @@ export async function buildDiff(
 
 export type TreeEntryType = "blob" | "tree" | "commit";
 
-const TREE_ENTRY_TYPES: readonly TreeEntryType[] = ["blob", "tree", "commit"];
-
 function isTreeEntryType(value: string): value is TreeEntryType {
-  return (TREE_ENTRY_TYPES as readonly string[]).includes(value);
+  return value === "blob" || value === "tree" || value === "commit";
 }
 
 export interface PathAtShaInfo {
@@ -108,7 +106,7 @@ export async function statPathAtSha(sha: string, repoPath: string): Promise<Path
       `git ls-tree returned unexpected entry type '${rawType}' for '${repoPath}' at ${sha}`,
     );
   }
-  const type: TreeEntryType = rawType;
+  const type = rawType;
 
   let sizeBytes = 0;
   if (type === "blob") {

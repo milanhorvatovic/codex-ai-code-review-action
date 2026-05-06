@@ -221,12 +221,10 @@ jobs:
         uses: milanhorvatovic/codex-ai-code-review-action/prepare@357e3f341a63345c381ad390ed2afa9aa2c366d5 # v2.1.0-rc.1
         with:
           allow-users: alice,bob,charlie # replace with real GitHub usernames; an empty value allows everyone
-          exclude-paths: | # adapt to your stack — examples for common ecosystems below
+          # Add one pattern per line. Other common entries: yarn.lock, pnpm-lock.yaml, vendor/**.
+          exclude-paths: |
             dist/**
             package-lock.json
-            # yarn.lock        # uncomment for yarn
-            # pnpm-lock.yaml   # uncomment for pnpm
-            # vendor/**        # uncomment if you commit vendored deps
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.prepare.outputs.skipped != 'true' && steps.prepare.outputs.has-changes == 'true'

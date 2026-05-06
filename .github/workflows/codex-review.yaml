@@ -9,20 +9,30 @@ name: Codex code review (dogfood)
 # and `retain-findings` are quoted explicitly to match the auditor-visible
 # pattern documented in docs/consumer-controls.md items 7 and 8.
 #
-# dist/** is excluded at two layers during the exclude-paths rollout:
-#   1. paths-ignore on the trigger keeps the workflow from running on
-#      dist-only PRs at all (zero compute spent).
-#   2. exclude-paths on the prepare step drops dist/** from the diff before
-#      chunking on mixed PRs that touch both src and dist.
+# Two patterns are excluded from review on this dogfood:
+#
+#   - dist/** — bundled artifact rebuilt on most src-touching PRs. Excluded
+#     at two layers during the exclude-paths rollout: paths-ignore on the
+#     trigger keeps the workflow from running on dist-only PRs at all, and
+#     exclude-paths on the prepare step drops dist/** from the diff before
+#     chunking on mixed PRs that touch both src and dist.
+#
+#   - package-lock.json — lockfile diffs on manual dep bumps are mechanical
+#     resolver output where AI review value is low. Manifest-vs-lockfile
+#     version drift is caught structurally by
+#     .github/actions/verify-lockfile-version/, and Dependabot lockfile-only
+#     bumps are filtered out of review by allow-users: milanhorvatovic.
+#
 # Until the next release ships and scripts/refresh-self-pins.ts bumps the
 # pinned SHA below to a commit that recognizes the exclude-paths input,
-# layer (2) is a no-op (the pinned SHA emits an "Unexpected input(s)"
-# warning and ignores the value, same shape as the v2.1.0
-# fail-on-missing-chunks rollout in consumer-controls.md item 8). Layer (1)
-# carries the mitigation alone in that window. Once the SHA refresh lands,
-# paths-ignore can be dropped because exclude-paths handles mixed PRs and
-# pure-dist PRs are then a non-issue for token cost (the diff is empty
-# after exclusion). See issue #106.
+# both exclude-paths entries are no-ops (the pinned SHA emits an
+# "Unexpected input(s)" warning and ignores the value, same shape as the
+# v2.1.0 fail-on-missing-chunks rollout in consumer-controls.md item 8).
+# In that window paths-ignore carries the dist/** mitigation alone, and
+# manual dep bumps still consume tokens on the lockfile diff — both clear
+# up after the SHA refresh, at which point paths-ignore can also be
+# dropped because exclude-paths covers mixed PRs and pure-dist PRs become
+# an empty diff after exclusion. See issue #106.
 
 on:
   pull_request:
@@ -58,8 +68,9 @@ jobs:
         uses: milanhorvatovic/codex-ai-code-review-action/prepare@0fc55cdd3d5cf9841c9ba58822354f67b6c63293 # v2.1.0-pre
         with:
           allow-users: milanhorvatovic # bounds OpenAI cost while the dogfood is being proven out; revisit after one release cycle
-          exclude-paths: | # see header comment for the two-layer rollout rationale; ignored by SHAs pre-this-release
+          exclude-paths: | # see header comment for the per-pattern rationale; ignored by SHAs pre-this-release
             dist/**
+            package-lock.json
           max-chunk-bytes: ${{ vars.CODEX_MAX_CHUNK_BYTES || '204800' }}
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

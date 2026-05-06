@@ -33,7 +33,7 @@ runs:
           echo "::error::input version=${VERSION} but package.json=${PKG_VERSION}"
           exit 1
         fi
-        CHANGELOG_VERSION="$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')"
+        CHANGELOG_VERSION="$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')" || true
         if [ "${VERSION}" != "${CHANGELOG_VERSION}" ]; then
           echo "::error::input version=${VERSION} but top CHANGELOG section=[${CHANGELOG_VERSION}]"
           exit 1

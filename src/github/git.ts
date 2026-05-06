@@ -45,12 +45,20 @@ export async function fetchBaseSha(
 export async function buildDiff(
   baseSha: string,
   headSha: string,
+  excludePaths: readonly string[] = [],
 ): Promise<string> {
-  const result = await getExecOutput("git", [
+  const args = [
     "diff",
     "--no-color",
     "--unified=3",
     `${baseSha}...${headSha}`,
-  ], { silent: true });
+  ];
+  if (excludePaths.length > 0) {
+    args.push("--", ".");
+    for (const pattern of excludePaths) {
+      args.push(`:(exclude)${pattern}`);
+    }
+  }
+  const result = await getExecOutput("git", args, { silent: true });
   return result.stdout;
 }

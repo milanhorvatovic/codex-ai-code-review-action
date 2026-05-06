@@ -348,6 +348,20 @@ describe("statPathAtSha", () => {
     expect(mockGetExecOutput).toHaveBeenCalledTimes(1);
   });
 
+  it("throws when ls-tree returns an unrecognized entry type", async () => {
+    mockGetExecOutput.mockResolvedValueOnce({
+      exitCode: 0,
+      stderr: "",
+      stdout:
+        "100644 tag aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tref.md\0",
+    });
+
+    await expect(statPathAtSha("base-sha", "ref.md")).rejects.toThrow(
+      /git ls-tree returned unexpected entry type 'tag' for 'ref\.md' at base-sha/,
+    );
+    expect(mockGetExecOutput).toHaveBeenCalledTimes(1);
+  });
+
   it("propagates cat-file -s failure with stderr context", async () => {
     mockGetExecOutput
       .mockResolvedValueOnce({

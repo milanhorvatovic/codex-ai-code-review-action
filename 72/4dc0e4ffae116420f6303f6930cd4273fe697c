@@ -1,0 +1,19 @@
+src/prepare/referenceFile.ts
+  s_331881674451c9::t_6ec1138106e05f 123,132,134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "724dc0e4ffae116420f6303f6930cd4273fe697c",
+  "prompts": {},
+  "sessions": {
+    "s_331881674451c9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_2014651faffe3H7ecbnbdJPt2V",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

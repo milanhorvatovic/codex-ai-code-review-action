@@ -1,0 +1,49 @@
+name: Verify release
+description: Runs the full release validation sequence (build, lint, typecheck, tests, lockfile invariant, package/CHANGELOG version consistency) against the checked-out commit.
+
+inputs:
+  version:
+    description: Bare semver under test (e.g. 2.1.0 or 2.1.0-rc.1).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-node-deps
+
+    - uses: ./.github/actions/verify-dist
+
+    - name: Lint
+      shell: bash
+      run: npm run lint
+
+    - name: Type check
+      shell: bash
+      run: npm run typecheck
+
+    - name: Run tests
+      shell: bash
+      run: npm test
+
+    - uses: ./.github/actions/verify-lockfile-version
+
+    - name: Validate version consistency
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ -z "${VERSION}" ]; then
+          echo "::error::verify-release received an empty version input"
+          exit 1
+        fi
+        PKG_VERSION="$(jq -r .version package.json)"
+        if [ "${VERSION}" != "${PKG_VERSION}" ]; then
+          echo "::error::input version=${VERSION} but package.json=${PKG_VERSION}"
+          exit 1
+        fi
+        CHANGELOG_VERSION="$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')"
+        if [ "${VERSION}" != "${CHANGELOG_VERSION}" ]; then
+          echo "::error::input version=${VERSION} but top CHANGELOG section=[${CHANGELOG_VERSION}]"
+          exit 1
+        fi

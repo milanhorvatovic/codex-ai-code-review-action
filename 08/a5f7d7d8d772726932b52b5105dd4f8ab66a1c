@@ -1,0 +1,19 @@
+src/prepare/referenceFile.integration.test.ts
+  s_3479dc44315811::t_0e91172ec4c90a 21-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "08a5f7d7d8d772726932b52b5105dd4f8ab66a1c",
+  "prompts": {},
+  "sessions": {
+    "s_3479dc44315811": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dfeac-3148-75b0-aefc-cf1b30aca3cc",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

@@ -25,6 +25,7 @@ describe("getPrepareInputs", () => {
     mockGetInput.mockImplementation((name: string) => {
       const inputs: Record<string, string> = {
         "allow-users": "user1,user2",
+        "exclude-paths": "dist/**\n*.lock",
         "github-token": "ghp-token",
         "max-chunk-bytes": "100000",
         "review-reference-file": ".github/codex/reference.md",
@@ -36,6 +37,7 @@ describe("getPrepareInputs", () => {
 
     expect(result.githubToken).toBe("ghp-token");
     expect(result.allowedUsers).toBe("user1,user2");
+    expect(result.excludePathsRaw).toBe("dist/**\n*.lock");
     expect(result.maxChunkBytes).toBe(100000);
     expect(result.reviewReferenceFile).toBe(".github/codex/reference.md");
   });

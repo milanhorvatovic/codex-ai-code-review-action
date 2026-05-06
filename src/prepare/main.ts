@@ -7,6 +7,7 @@ import { getPrepareInputs } from "../config/inputs.js";
 import { isAuthorAllowed } from "../core/allowlist.js";
 import { buildChunkMatrix, splitDiff } from "../core/diff.js";
 import { assemblePrompt } from "../core/prompt.js";
+import { ExcludePathsError, parseExcludePaths } from "./excludePaths.js";
 import {
   ReviewReferenceFileError,
   resolveReviewReferenceContent,
@@ -34,11 +35,22 @@ async function run(): Promise<void> {
 
   core.setOutput("skipped", "false");
 
+  let excludePaths: string[];
+  try {
+    excludePaths = parseExcludePaths(inputs.excludePathsRaw);
+  } catch (error) {
+    if (error instanceof ExcludePathsError) {
+      core.setFailed(`Invalid exclude-paths: ${error.message}`);
+      return;
+    }
+    throw error;
+  }
+
   let diff: string;
   core.startGroup("Building PR diff");
   try {
     await fetchBaseSha(prContext.baseSha, inputs.githubToken);
-    diff = await buildDiff(prContext.baseSha, prContext.headSha);
+    diff = await buildDiff(prContext.baseSha, prContext.headSha, excludePaths);
     fs.mkdirSync(CODEX_DIR, { recursive: true });
     fs.writeFileSync(DIFF_FILE, diff);
   } catch (error) {

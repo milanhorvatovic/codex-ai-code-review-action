@@ -1,0 +1,19 @@
+dist/prepare/main.js
+  s_331881674451c9::t_bbf9c25e77e93c 1-5,13-16,18-22,34,40-41,45-46,312,338-339,341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "af35ea7395deffe69404aefab54ace46fff253b5",
+  "prompts": {},
+  "sessions": {
+    "s_331881674451c9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_2014651faffe3H7ecbnbdJPt2V",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

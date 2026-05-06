@@ -24,8 +24,8 @@ runs:
           echo "::error::verify-release received an empty version input"
           exit 1
         fi
-        if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
-          echo "::error::verify-release received a non-semver version input: ${VERSION}"
+        if [[ ! "${VERSION}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$ ]]; then
+          echo "::error::verify-release received a non-semver version input: ${VERSION} (expected MAJOR.MINOR.PATCH[-PRERELEASE]; no leading zeros, no '+' build metadata)"
           exit 1
         fi
         PKG_VERSION="$(jq -r .version package.json)"

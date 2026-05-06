@@ -18,6 +18,8 @@ function git(args: string[], cwd: string): string {
       GIT_AUTHOR_EMAIL: "test@example.com",
       GIT_COMMITTER_NAME: "test",
       GIT_COMMITTER_EMAIL: "test@example.com",
+      GIT_CONFIG_GLOBAL: os.devNull,
+      GIT_CONFIG_NOSYSTEM: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   }).toString("utf8");

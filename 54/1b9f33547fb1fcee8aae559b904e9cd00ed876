@@ -1,0 +1,19 @@
+.github/actions/verify-release/action.yaml
+  s_fcbb6038636578::t_3e41fe29abbb26 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "541b9f33547fb1fcee8aae559b904e9cd00ed876",
+  "prompts": {},
+  "sessions": {
+    "s_fcbb6038636578": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_200a9f7dcffeJR9igvsSd01PTy",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

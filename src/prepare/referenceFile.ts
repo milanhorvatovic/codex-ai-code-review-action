@@ -54,6 +54,7 @@ export function validateReviewReferencePath(input: string): string {
 
 export function resolveReviewReferenceFromWorkspace(input: string, cwd: string): string {
   const normalized = validateReviewReferencePath(input);
+  const trimmed = input.trim();
 
   let realCwd: string;
   try {
@@ -75,19 +76,19 @@ export function resolveReviewReferenceFromWorkspace(input: string, cwd: string):
     } catch (error) {
       if (isErrnoException(error) && error.code === "ENOENT") {
         throw new ReviewReferenceFileError(
-          `file not found: '${input.trim()}' (resolved to '${current}')`,
+          `file not found: '${trimmed}' (resolved to '${current}')`,
         );
       }
       throw new ReviewReferenceFileError(
-        `cannot stat '${input.trim()}': ${describeError(error)}`,
+        `cannot stat '${trimmed}': ${describeError(error)}`,
       );
     }
     if (stat.isSymbolicLink()) {
       const isLeaf = i === components.length - 1;
       throw new ReviewReferenceFileError(
         isLeaf
-          ? `path '${input.trim()}' is a symbolic link; symlinks are not allowed`
-          : `path '${input.trim()}' resolves through a symbolic link`,
+          ? `path '${trimmed}' is a symbolic link; symlinks are not allowed`
+          : `path '${trimmed}' resolves through a symbolic link`,
       );
     }
     leafStat = stat;
@@ -95,17 +96,17 @@ export function resolveReviewReferenceFromWorkspace(input: string, cwd: string):
 
   if (leafStat === undefined) {
     throw new ReviewReferenceFileError(
-      `path '${input.trim()}' did not resolve to a file`,
+      `path '${trimmed}' did not resolve to a file`,
     );
   }
   if (!leafStat.isFile()) {
     throw new ReviewReferenceFileError(
-      `path '${input.trim()}' is not a regular file`,
+      `path '${trimmed}' is not a regular file`,
     );
   }
   if (leafStat.size > REFERENCE_MAX_BYTES) {
     throw new ReviewReferenceFileError(
-      `file '${input.trim()}' is ${leafStat.size} bytes, exceeds ${REFERENCE_MAX_BYTES}-byte limit`,
+      `file '${trimmed}' is ${leafStat.size} bytes, exceeds ${REFERENCE_MAX_BYTES}-byte limit`,
     );
   }
 

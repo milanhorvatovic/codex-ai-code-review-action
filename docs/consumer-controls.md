@@ -143,7 +143,7 @@ The rule has two strict halves:
 
 `exclude-paths` is the only item in this checklist that is genuinely optional — every other item is a hard constraint. Skip this item entirely if your workflow does not set `exclude-paths`; the empty default preserves the original behavior of reviewing every file in the diff. It is included here so an auditor reading the workflow file in one pass has a single document covering every prepare-step input.
 
-**What it does.** When set, the prepare step forwards each entry to `git diff` as a `:(exclude)<glob>` pathspec. The resulting diff omits matching files before chunking — no OpenAI tokens spent on generated artifacts (`dist/`), lockfiles, or other content with no review value. Unmatched entries no-op silently; an entry like `dist/**` does not need to be removed when a particular PR did not touch `dist/`.
+**What it does.** When set, the prepare step passes each entry to `git diff` as a `:(exclude)<glob>` pathspec. The resulting diff omits matching files before chunking — no OpenAI tokens spent on generated artifacts (`dist/`), lockfiles, or other content with no review value. Unmatched entries no-op silently; an entry like `dist/**` does not need to be removed when a particular PR did not touch `dist/`.
 
 #### What it is *not*
 
@@ -161,7 +161,7 @@ The action validates every entry before `git diff` runs. It fails the entire run
 
 | Rule | Why |
 |---|---|
-| Contains a NUL byte | Control character; command-injection vector. |
+| Contains a NUL byte | NUL is a C-string terminator; on POSIX it would truncate the argv element passed to `git`, silently widening the exclusion scope from `:(exclude)foo\0bar` to `:(exclude)foo`. |
 | Contains a backslash (`\`) | Windows separator + magic-prefix evasion. POSIX only. |
 | Starts with `:` | Pathspec magic prefix; the action prepends `:(exclude)` itself, and allowing consumer-supplied magic would let a misuse swap exclusion for inclusion or alter pathspec scope. |
 | Starts with `/` | Absolute path; use workspace-relative patterns. |

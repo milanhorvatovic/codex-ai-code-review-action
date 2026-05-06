@@ -217,7 +217,6 @@ jobs:
           persist-credentials: false
 
       - id: prepare
-        # SHA corresponds to tag v2.1.0-rc.1 — update when adopting a new release.
         uses: milanhorvatovic/codex-ai-code-review-action/prepare@357e3f341a63345c381ad390ed2afa9aa2c366d5 # v2.1.0-rc.1
         with:
           allow-users: alice,bob,charlie # replace with real GitHub usernames; an empty value allows everyone

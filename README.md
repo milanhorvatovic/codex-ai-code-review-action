@@ -221,9 +221,12 @@ jobs:
         uses: milanhorvatovic/codex-ai-code-review-action/prepare@357e3f341a63345c381ad390ed2afa9aa2c366d5 # v2.1.0-rc.1
         with:
           allow-users: alice,bob,charlie # replace with real GitHub usernames; an empty value allows everyone
-          exclude-paths: |
+          exclude-paths: | # adapt to your stack — examples for common ecosystems below
             dist/**
-            *.lock
+            package-lock.json
+            # yarn.lock        # uncomment for yarn
+            # pnpm-lock.yaml   # uncomment for pnpm
+            # vendor/**        # uncomment if you commit vendored deps
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.prepare.outputs.skipped != 'true' && steps.prepare.outputs.has-changes == 'true'
@@ -285,7 +288,7 @@ jobs:
           fail-on-missing-chunks: "true" # explicit for auditors (consumer-controls.md item 8)
 ```
 
-> **`exclude-paths` keeps generated artifacts out of the diff before chunking.** The example above lists `dist/**` and `*.lock`; both consume OpenAI tokens with no review value when their changes ship as part of a mixed PR. The action prepends `:(exclude)` to each entry and forwards them to `git diff` as pathspecs, so unmatched patterns silently no-op (you do not need to remove an entry just because a particular PR did not touch it). This is a token-cost knob, not a security control — it does not replace `paths-ignore:` at the trigger level or the same-repo gate from the `if:` lines, which control whether the workflow runs at all. See [Consumer controls — item 10](docs/consumer-controls.md#10-optional-tune-exclude-paths-for-token-cost-not-as-a-security-control) for the validation rules and the cap rationale.
+> **`exclude-paths` keeps generated artifacts out of the diff before chunking.** The example above excludes `dist/**` (a bundled artifact rebuilt on most src-touching PRs) and `package-lock.json` (mechanical resolver output where AI review value is low — most repos cover lockfile drift via `npm audit` and CI integrity checks). The patterns are git pathspec syntax, not gitignore — `*` matches any character including `/`, and there is no `!` negation. Unmatched patterns silently no-op (you do not need to remove an entry just because a particular PR did not touch it). Adapt to your stack: yarn repos use `yarn.lock`, pnpm repos use `pnpm-lock.yaml`, vendored-deps repos add `vendor/**`. This is a token-cost knob, not a security control — it does not replace `paths-ignore:` at the trigger level or the same-repo gate from the `if:` lines, which control whether the workflow runs at all. See [Consumer controls — item 10](docs/consumer-controls.md#10-optional-tune-exclude-paths-for-token-cost-not-as-a-security-control) for the validation rules and the cap rationale.
 
 > **`review-reference-file` is PR-controlled in workspace mode.** Two separate guarantees apply, and they are not the same thing:
 >

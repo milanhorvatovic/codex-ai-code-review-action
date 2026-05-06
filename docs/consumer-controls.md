@@ -141,34 +141,45 @@ The rule has two strict halves:
 
 > **Owner:** Optional; consumer responsibility when used.
 
-`exclude-paths` is the only item in this checklist that is genuinely optional — every other item is a hard constraint. It is included here so an auditor reading the workflow file in one pass has a single document that explains what every prepare-step input does, why it is wired the way it is, and what the validation guarantees are. Skip this item entirely if your workflow does not set `exclude-paths`; the empty default preserves the original behavior of reviewing every file in the diff.
+`exclude-paths` is the only item in this checklist that is genuinely optional — every other item is a hard constraint. Skip this item entirely if your workflow does not set `exclude-paths`; the empty default preserves the original behavior of reviewing every file in the diff. It is included here so an auditor reading the workflow file in one pass has a single document covering every prepare-step input.
 
-**What it does.** When the consumer sets `exclude-paths`, the prepare step forwards each entry to `git diff` as a `:(exclude)<glob>` pathspec. The resulting diff omits files matching any entry before chunking, which means OpenAI tokens are not spent on generated artifacts (`dist/`, `vendor/`), lockfiles, or other content that has no review value. Unmatched entries silently no-op; an entry like `dist/**` does not need to be removed when a particular PR did not touch `dist/`.
+**What it does.** When set, the prepare step forwards each entry to `git diff` as a `:(exclude)<glob>` pathspec. The resulting diff omits matching files before chunking — no OpenAI tokens spent on generated artifacts (`dist/`), lockfiles, or other content with no review value. Unmatched entries no-op silently; an entry like `dist/**` does not need to be removed when a particular PR did not touch `dist/`.
 
-**This is a cost optimization, not a security control.** Three things this input does **not** do:
+#### What it is *not*
 
-1. It does not gate which workflow runs trigger. That is `on.pull_request.paths-ignore:` at the trigger level (covered by item 2's choice of trigger) plus the same-repo gate from item 3. A workflow that runs on a fork PR or a draft is not protected by `exclude-paths` — the workflow already started by the time `prepare` parses inputs.
-2. It does not constrain who can trigger reviews. That is `allow-users` (set on `prepare`).
-3. It does not affect what the model treats as policy or what files it reviews semantically. The model only sees the diff after exclusions, but the review-rule policy comes from `review-reference-file` (item 9) and the action's built-in default.
+This is a **cost optimization**, not a security control:
 
-If you need to skip whole runs, use `paths-ignore:` at the trigger level — the workflow does not start, no compute is spent, and `allow-users` enforcement is moot. Use `exclude-paths` only when the workflow *should* run (the PR also touches reviewable code) and you want to drop a subset of the diff from review.
+- **Does not gate which workflow runs trigger.** That is `on.pull_request.paths-ignore:` at the trigger level (item 2's trigger choice) plus the same-repo gate (item 3). A workflow already running on a fork or draft is not protected by `exclude-paths` — `prepare` only parses the input after the workflow has been scheduled.
+- **Does not constrain who can trigger reviews.** That is `allow-users`.
+- **Does not affect what the model treats as review policy.** Policy comes from `review-reference-file` (item 9) and the built-in default; `exclude-paths` only narrows the diff fed to the model.
 
-**Validation rules — the action fails closed.** When `exclude-paths` is set, every entry is validated before `git diff` runs. The action fails the entire run with `Invalid exclude-paths: <reason>` if any of the following are true:
+If you need to skip whole runs, use `paths-ignore:` at the trigger level — the workflow does not start, no compute is spent. Use `exclude-paths` only when the workflow *should* run (the PR also touches reviewable code) and you want to drop a subset of the diff from review.
 
-- An entry contains a NUL byte.
-- An entry contains a backslash (`\`). Use POSIX separators only.
-- An entry starts with `:`. The leading colon is git pathspec magic, and the action prepends `:(exclude)` itself; allowing consumer-supplied magic prefixes would let a misuse swap exclusion for inclusion or change pathspec scope.
-- An entry starts with `/` (absolute path).
-- An entry contains a `..` segment (anywhere — `../foo`, `foo/../bar`, etc.).
-- More than 64 entries are provided.
+#### Validation rules
 
-Empty input and whitespace-only input are treated as if the input was not provided at all — no pathspec args are appended, current behavior is preserved. Blank lines and CR characters from CRLF line endings are dropped silently per entry. So a single trailing newline or a Windows-style file with `\r\n` endings does not require special handling.
+The action validates every entry before `git diff` runs. It fails the entire run with `Invalid exclude-paths: <reason>` if any entry:
 
-**Why the 64-entry cap.** The cap is a defensive bound, not a hard performance constraint. Real-world artifact-exclusion lists fit well inside 64 entries (`dist/**`, `vendor/**`, `*.lock`, `build/**`, `generated/**`, plus a handful of extension globs covers most repositories). If you need more, the underlying problem is usually solved better by a different design — a file-extension allowlist, a separate review scope per directory, or a wrapper that splits the workflow into multiple `prepare` invocations. The cap also prevents accidental misuse where a consumer pipes a file list (`find dist -type f`) into the input, which would balloon the `git diff` command line and obscure the intent.
+| Rule | Why |
+|---|---|
+| Contains a NUL byte | Control character; command-injection vector. |
+| Contains a backslash (`\`) | Windows separator + magic-prefix evasion. POSIX only. |
+| Starts with `:` | Pathspec magic prefix; the action prepends `:(exclude)` itself, and allowing consumer-supplied magic would let a misuse swap exclusion for inclusion or alter pathspec scope. |
+| Starts with `/` | Absolute path; use workspace-relative patterns. |
+| Contains a `..` segment | Anywhere — `../foo`, `foo/../bar`. Defensive against escape-style patterns. |
 
-**Wrapper-safe.** Unlike `review-reference-file` (item 9), `exclude-paths` is wrapper-safe and listed under "Safe to expose for product repos" in [Extending the wrapper's input surface](../README.md#extending-the-wrappers-input-surface). A same-repo PR author who edits the wrapper consumer's `exclude-paths` value can only narrow the diff sent to OpenAI; the validation rules above prevent broadening, escape, or pathspec-magic abuse. The action's safety guarantees (key isolation, write-permission split, allowlist enforcement) do not depend on which files appear in the diff.
+Plus: a hard cap of **64 entries**; exceeding it fails closed with the entry count in the message.
 
-**How to apply:** see the [Production workflow example](../README.md#production-workflow-example) for an `exclude-paths: |\n  dist/**\n  *.lock` snippet, and the [Prepare action inputs](../README.md#prepare-action-inputs) table for the input definition.
+Empty input and whitespace-only input are treated as if the input was not provided at all — no pathspec args appended, current behavior preserved. Blank lines and CR characters from CRLF line endings are dropped silently. Trailing newlines and Windows-style line endings need no special handling.
+
+#### Why the 64-entry cap
+
+The cap is a defensive bound, not a hard performance constraint. Real-world artifact-exclusion lists fit well inside 64 entries (`dist/**`, `vendor/**`, lockfile literals, `build/**`, `generated/**`, plus a handful of extension globs covers most repositories). The cap prevents accidental misuse — e.g. a consumer piping a file list (`find dist -type f`) into the input, which would balloon the `git diff` command line and obscure intent. If you legitimately need more, the underlying problem is usually solved better by a different design: a file-extension allowlist, a separate review scope per directory, or a wrapper that splits the workflow into multiple `prepare` invocations.
+
+#### Wrapper-safety
+
+Unlike `review-reference-file` (item 9), `exclude-paths` is wrapper-safe and is listed under "Safe to expose for product repos" in [Extending the wrapper's input surface](../README.md#extending-the-wrappers-input-surface). A same-repo PR author who edits a wrapper consumer's `exclude-paths` value can only narrow the diff sent to OpenAI; the validation rules above prevent broadening, escape, and pathspec-magic abuse. The action's safety guarantees (key isolation, write-permission split, allowlist enforcement) do not depend on which files appear in the diff.
+
+**How to apply:** see the [Production workflow example](../README.md#production-workflow-example) for an `exclude-paths` snippet adapted to common ecosystems, and the [Prepare action inputs](../README.md#prepare-action-inputs) table for the input definition.
 
 ## Why fork PRs are skipped
 

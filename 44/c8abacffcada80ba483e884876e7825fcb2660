@@ -1,0 +1,22 @@
+.github/actions/verify-lockfile-version/action.yaml
+  s_53073d19c9c5c4::t_f5cbc432edf9fa 29-32
+.github/actions/verify-release/action.yaml
+  s_53073d19c9c5c4::t_5f130cbd8a92c8 49-52
+  s_53073d19c9c5c4::t_4cacb446ff6877 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "44c8abacffcada80ba483e884876e7825fcb2660",
+  "prompts": {},
+  "sessions": {
+    "s_53073d19c9c5c4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1fd372b51ffeA5mdWFGN1HZJwy",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

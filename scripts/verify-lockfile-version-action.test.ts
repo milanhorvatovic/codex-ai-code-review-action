@@ -133,4 +133,29 @@ describe("verify-lockfile-version composite", () => {
       },
     );
   });
+
+  it("escapes jq-extracted root package version on the missing-metadata error path", async () => {
+    const script = extractSingleRunBlock(
+      await readSource(".github/actions/verify-lockfile-version/action.yaml"),
+    );
+
+    withTempPackage(
+      {
+        packageJson: { version: "1.0.0" },
+        packageLockJson: {
+          packages: { "": { version: "1.0.0\n::warning::root%done\rCR" } },
+        },
+      },
+      (cwd) => {
+        const result = spawnSync("bash", ["-c", script], {
+          cwd,
+          encoding: "utf-8",
+        });
+
+        expectFailedAnnotation(result, [
+          "::error::package-lock.json is missing required version metadata (top='' root-pkg='1.0.0%0A::warning::root%25done%0DCR'); lockfileVersion 3 must include both.",
+        ]);
+      },
+    );
+  });
 });

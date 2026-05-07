@@ -56,6 +56,11 @@ runs:
           echo "::error::input version=${escaped_version} but package.json=${escaped_pkg_version}"
           exit 1
         fi
+        # Detect a missing CHANGELOG.md explicitly so the annotation surface mirrors the package.json guard above; without this, the grep pipeline would only leak its "No such file or directory" message to stderr and the mismatch branch below would emit a misleading "top CHANGELOG section=[]" diagnostic.
+        if [ ! -f CHANGELOG.md ]; then
+          echo "::error::CHANGELOG.md not found in $(pwd); cannot verify the top section against the input version"
+          exit 1
+        fi
         CHANGELOG_VERSION="$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')" || true
         if [ "${VERSION}" != "${CHANGELOG_VERSION}" ]; then
           escaped_changelog_version="$(escape_workflow_command "${CHANGELOG_VERSION}")"

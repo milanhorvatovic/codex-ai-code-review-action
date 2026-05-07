@@ -26,9 +26,23 @@ runs:
           value="${value//$'\n'/%0A}"
           printf '%s' "${value}"
         }
-        PKG="$(jq -r .version package.json)"
-        LOCK_TOP="$(jq -r '.version // empty' package-lock.json)"
-        LOCK_ROOT_PKG="$(jq -r '.packages[""].version // empty' package-lock.json)"
+        # Each jq read is guarded so a missing or malformed JSON file surfaces as a workflow annotation instead of a silent set-e exit. `.version // empty` on package.json collapses a missing key or explicit null value to "" so a literal "null" cannot reach the mismatch comparison below.
+        PKG="$(jq -r '.version // empty' package.json)" || {
+          echo "::error::Failed to read version from package.json; ensure the file exists and contains valid JSON"
+          exit 1
+        }
+        if [ -z "${PKG}" ]; then
+          echo "::error::package.json is missing the required 'version' field"
+          exit 1
+        fi
+        LOCK_TOP="$(jq -r '.version // empty' package-lock.json)" || {
+          echo "::error::Failed to read version from package-lock.json; ensure the file exists and contains valid JSON"
+          exit 1
+        }
+        LOCK_ROOT_PKG="$(jq -r '.packages[""].version // empty' package-lock.json)" || {
+          echo "::error::Failed to read packages[\"\"].version from package-lock.json; ensure the file exists and contains valid JSON"
+          exit 1
+        }
         if [ -z "${LOCK_TOP}" ] || [ -z "${LOCK_ROOT_PKG}" ]; then
           escaped_lock_top="$(escape_workflow_command "${LOCK_TOP}")"
           escaped_lock_root_pkg="$(escape_workflow_command "${LOCK_ROOT_PKG}")"

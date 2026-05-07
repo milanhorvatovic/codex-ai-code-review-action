@@ -1,0 +1,9 @@
+scripts/verify-release-action.test.ts
+  ai_agent 311-328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "67fb3f642f240b1ff1e88df4a480a974caf0f674",
+  "prompts": {}
+}

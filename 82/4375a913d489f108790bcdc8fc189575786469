@@ -1,0 +1,21 @@
+.github/actions/verify-release/action.yaml
+  s_517f5ae8d72921::t_56cb765368d4dd 48
+  s_517f5ae8d72921::t_5d4f7560a9d6a6 34
+  s_517f5ae8d72921::t_06fcbd6c82bf0c 54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "824375a913d489f108790bcdc8fc189575786469",
+  "prompts": {},
+  "sessions": {
+    "s_517f5ae8d72921": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1fe37a61bffeRmf63gUlIFlqJr",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

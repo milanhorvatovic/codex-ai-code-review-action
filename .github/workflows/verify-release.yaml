@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: Full SHA-1 commit ID to validate (40 lowercase hex chars). Refs like branch or tag names are rejected so that re-running the same `(sha, version)` pair always hits the same commit.
+        description: Full SHA-1 commit ID to validate (40 hex chars; case-insensitive, normalized to lowercase before checkout). Refs like branch or tag names are rejected so that re-running the same `(sha, version)` pair always hits the same commit.
         required: true
         type: string
       version:
@@ -23,6 +23,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Validate sha input
+        id: validate-sha
         env:
           SHA: ${{ inputs.sha }}
         run: |
@@ -37,12 +38,14 @@ jobs:
             value="${value//$'\n'/%0A}"
             printf '%s' "${value}"
           }
-          # actions/checkout would otherwise resolve branch/tag names here; the verifier exists to make (sha, version) pairs reproducible, so reject anything that isn't a full SHA-1 commit ID.
-          if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+          # actions/checkout would otherwise resolve branch/tag names here; the verifier exists to make (sha, version) pairs reproducible, so reject anything that isn't a full SHA-1 commit ID. Hex is case-insensitive — accept upper/mixed and emit a lowercase canonical form below so downstream logs and cache keys reference one stable string regardless of input case.
+          if [[ ! "${SHA}" =~ ^[0-9a-fA-F]{40}$ ]]; then
             escaped_sha="$(escape_workflow_command "${SHA}")"
-            echo "::error::Input 'sha' must be a full SHA-1 commit ID (40 lowercase hex chars). Refs like branch or tag names are rejected to keep verification reproducible. Got: ${escaped_sha}"
+            echo "::error::Input 'sha' must be a full SHA-1 commit ID (40 hex chars). Refs like branch or tag names are rejected to keep verification reproducible. Got: ${escaped_sha}"
             exit 1
           fi
+          sha_lc="$(printf '%s' "${SHA}" | tr '[:upper:]' '[:lower:]')"
+          echo "sha=${sha_lc}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout verifier definition
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -53,7 +56,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          ref: ${{ inputs.sha }}
+          ref: ${{ steps.validate-sha.outputs.sha }}
           path: candidate
 
       - uses: ./.github/actions/verify-release

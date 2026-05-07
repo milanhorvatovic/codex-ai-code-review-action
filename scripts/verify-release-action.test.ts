@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,8 +50,9 @@ function extractStepRunBlock(source: string, stepName: string): string {
 function withTempDir(
   files: Record<string, string>,
   callback: (cwd: string) => void,
+  prefix: string = "verify-release-",
 ): void {
-  const cwd = mkdtempSync(join(tmpdir(), "verify-release-"));
+  const cwd = mkdtempSync(join(tmpdir(), prefix));
   try {
     for (const [name, content] of Object.entries(files)) {
       writeFileSync(join(cwd, name), content, { encoding: "utf-8" });
@@ -318,11 +319,30 @@ describe("verify-release composite - validate version consistency", () => {
       (cwd) => {
         const result = runScript(script, cwd, { VERSION: "1.0.0" });
         expect(result.status).toBe(1);
+        expect(result.stderr).toBe("");
         expect(result.stdout).toContain(
           "::error::CHANGELOG.md not found in",
         );
         expect(result.stdout).not.toContain("top CHANGELOG section=[]");
       },
+    );
+  });
+
+  it("escapes the working directory on the missing CHANGELOG.md error path", async () => {
+    const script = extractStepRunBlock(await readSource(ACTION_PATH), "Validate version consistency");
+
+    withTempDir(
+      {
+        "package.json": JSON.stringify({ version: "1.0.0" }),
+      },
+      (cwd) => {
+        const result = runScript(script, cwd, { VERSION: "1.0.0" });
+        const realCwd = realpathSync(cwd);
+        expectFailedAnnotation(result, [
+          `::error::CHANGELOG.md not found in ${realCwd.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")}; cannot verify the top section against the input version`,
+        ]);
+      },
+      "verify-release-%done-",
     );
   });
 
@@ -350,17 +370,14 @@ describe("verify-release composite - validate version consistency", () => {
 
     withTempDir(
       {
-        "package.json": JSON.stringify({ version: "1.0.0" }),
-        "CHANGELOG.md": "## [1.0.0\n::error::leak%done]\n",
+        "package.json": JSON.stringify({ version: "2.0.0" }),
+        "CHANGELOG.md": "## [1.0.0%done\rCR]\n",
       },
       (cwd) => {
         const result = runScript(script, cwd, { VERSION: "2.0.0" });
-        expect(result.status).toBe(1);
-        const annotation = result.stdout
-          .split("\n")
-          .find((line) => line.startsWith("::error::"));
-        expect(annotation).toBeDefined();
-        expect(annotation).not.toContain("::error::leak");
+        expectFailedAnnotation(result, [
+          "::error::input version=2.0.0 but top CHANGELOG section=[1.0.0%25done%0DCR]",
+        ]);
       },
     );
   });

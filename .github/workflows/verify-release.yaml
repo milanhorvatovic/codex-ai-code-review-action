@@ -27,9 +27,17 @@ jobs:
           SHA: ${{ inputs.sha }}
         run: |
           set -euo pipefail
+          escape_workflow_command() {
+            local value="$1"
+            value="${value//%/%25}"
+            value="${value//$'\r'/%0D}"
+            value="${value//$'\n'/%0A}"
+            printf '%s' "${value}"
+          }
           # actions/checkout would otherwise resolve branch/tag names here; the verifier exists to make (sha, version) pairs reproducible, so reject anything that isn't a full SHA-1 commit ID.
           if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Input 'sha' must be a full SHA-1 commit ID (40 lowercase hex chars). Refs like branch or tag names are rejected to keep verification reproducible. Got: ${SHA}"
+            escaped_sha="$(escape_workflow_command "${SHA}")"
+            echo "::error::Input 'sha' must be a full SHA-1 commit ID (40 lowercase hex chars). Refs like branch or tag names are rejected to keep verification reproducible. Got: ${escaped_sha}"
             exit 1
           fi
 

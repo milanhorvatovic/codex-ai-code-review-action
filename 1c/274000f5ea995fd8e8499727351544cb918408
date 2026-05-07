@@ -1,0 +1,20 @@
+scripts/verify-release-workflow.test.ts
+  s_5ad1441dfdd18e::t_8a59392057735a 7,10
+  s_5ad1441dfdd18e::t_aeb764ef9f22cc 77-83,89,95,101-108,115,122,129,137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "1c274000f5ea995fd8e8499727351544cb918408",
+  "prompts": {},
+  "sessions": {
+    "s_5ad1441dfdd18e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1fbcd1d48ffe7sf1ukm7HLQHd9",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

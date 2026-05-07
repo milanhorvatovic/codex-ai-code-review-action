@@ -42,10 +42,15 @@ runs:
           echo "::error::verify-release received a non-semver version input: ${escaped_version} (expected MAJOR.MINOR.PATCH[-PRERELEASE]; no leading zeros, no '+' build metadata)"
           exit 1
         fi
-        PKG_VERSION="$(jq -r .version package.json)" || {
+        PKG_VERSION="$(jq -r '.version // empty' package.json)" || {
           echo "::error::Failed to read version from package.json; ensure the file exists and contains valid JSON"
           exit 1
         }
+        # `// empty` collapses both a missing `.version` key and an explicit `null` value to "" so the comparison below cannot succeed against the literal string "null" and surface a misleading mismatch annotation; treat the absence as its own diagnostic instead.
+        if [ -z "${PKG_VERSION}" ]; then
+          echo "::error::package.json is missing the required 'version' field"
+          exit 1
+        fi
         if [ "${VERSION}" != "${PKG_VERSION}" ]; then
           escaped_pkg_version="$(escape_workflow_command "${PKG_VERSION}")"
           echo "::error::input version=${escaped_version} but package.json=${escaped_pkg_version}"

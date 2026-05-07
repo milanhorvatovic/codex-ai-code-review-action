@@ -1,0 +1,30 @@
+scripts/verify-release-action.test.ts
+  s_4ebd366e680744::t_dced44d022a40a 322
+  s_4ebd366e680744::t_e9a6234f9d0f5d 53
+  s_cc474c6821624b::t_b468ec2e8d6c99 1,340,342,373
+  s_cc474c6821624b::t_d9c8052e4e32d2 55,331-339,341,343-348,374,378-380
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "9195f2d6e5f9bb1a68f933d1b7d7e816ed48c0f1",
+  "prompts": {},
+  "sessions": {
+    "s_4ebd366e680744": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1fd3ffe54ffeX7UKsNKS09yQQo",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    },
+    "s_cc474c6821624b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e02b9-f13d-7ea0-99c5-e68e51fd943b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

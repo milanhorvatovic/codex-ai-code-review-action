@@ -14,7 +14,11 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
-        # Neutralize jq-extracted values before echoing into ::error:: workflow commands; in PR contexts package.json / package-lock.json are attacker-controlled and JSON strings can legally contain '%', CR, or LF, which would otherwise corrupt the annotation stream or inject additional workflow commands. Mirrors the helper in .github/actions/verify-release/action.yaml — keep in sync.
+        # Neutralize jq-extracted values before echoing into ::error:: workflow commands.
+        # In PR contexts package.json / package-lock.json are attacker-controlled, and
+        # JSON strings can legally contain '%', CR, or LF. The same helper appears in
+        # .github/actions/verify-release/action.yaml and .github/workflows/verify-release.yaml;
+        # keep the copies in sync.
         escape_workflow_command() {
           local value="$1"
           value="${value//%/%25}"

@@ -20,7 +20,10 @@ runs:
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        # Neutralize values that may carry attacker-controlled content (the version input on the failed-semver path; package.json / CHANGELOG.md contents on the consistency-check paths) before echoing into ::error:: workflow commands. Mirrors the helper in .github/workflows/verify-release.yaml and .github/actions/verify-lockfile-version/action.yaml — keep in sync.
+        # Neutralize values that may carry attacker-controlled content before echoing into
+        # ::error:: workflow commands. The same helper appears in
+        # .github/workflows/verify-release.yaml and
+        # .github/actions/verify-lockfile-version/action.yaml; keep the copies in sync.
         escape_workflow_command() {
           local value="$1"
           value="${value//%/%25}"

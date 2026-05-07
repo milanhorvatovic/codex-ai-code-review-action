@@ -31,6 +31,7 @@ runs:
           value="${value//$'\n'/%0A}"
           printf '%s' "${value}"
         }
+        escaped_version="$(escape_workflow_command "${VERSION}")"
         # Mirrors parseVersion in scripts/changelog.ts — keep in sync. parseVersion is the canonical rule used downstream by extract-changelog-section.ts, prepare-release.ts, and refresh-self-pins.ts; a value accepted here that parseVersion would reject (or vice versa) re-introduces the schema/runtime gap this composite exists to close.
         SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
         if [ -z "${VERSION}" ]; then
@@ -38,20 +39,19 @@ runs:
           exit 1
         fi
         if [[ ! "${VERSION}" =~ ${SEMVER_RE} ]]; then
-          escaped_version="$(escape_workflow_command "${VERSION}")"
           echo "::error::verify-release received a non-semver version input: ${escaped_version} (expected MAJOR.MINOR.PATCH[-PRERELEASE]; no leading zeros, no '+' build metadata)"
           exit 1
         fi
         PKG_VERSION="$(jq -r .version package.json)"
         if [ "${VERSION}" != "${PKG_VERSION}" ]; then
           escaped_pkg_version="$(escape_workflow_command "${PKG_VERSION}")"
-          echo "::error::input version=${VERSION} but package.json=${escaped_pkg_version}"
+          echo "::error::input version=${escaped_version} but package.json=${escaped_pkg_version}"
           exit 1
         fi
         CHANGELOG_VERSION="$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')" || true
         if [ "${VERSION}" != "${CHANGELOG_VERSION}" ]; then
           escaped_changelog_version="$(escape_workflow_command "${CHANGELOG_VERSION}")"
-          echo "::error::input version=${VERSION} but top CHANGELOG section=[${escaped_changelog_version}]"
+          echo "::error::input version=${escaped_version} but top CHANGELOG section=[${escaped_changelog_version}]"
           exit 1
         fi
 

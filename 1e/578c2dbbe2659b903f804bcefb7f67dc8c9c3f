@@ -1,0 +1,9 @@
+scripts/verify-release-workflow.test.ts
+  ai_agent 19-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "1e578c2dbbe2659b903f804bcefb7f67dc8c9c3f",
+  "prompts": {}
+}

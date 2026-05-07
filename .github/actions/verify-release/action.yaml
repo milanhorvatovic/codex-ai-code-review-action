@@ -20,6 +20,14 @@ runs:
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
+        # Neutralize values that may carry attacker-controlled content (the version input on the failed-semver path; package.json / CHANGELOG.md contents on the consistency-check paths) before echoing into ::error:: workflow commands. Mirrors the helper in .github/workflows/verify-release.yaml — keep in sync.
+        escape_workflow_command() {
+          local value="$1"
+          value="${value//%/%25}"
+          value="${value//$'\r'/%0D}"
+          value="${value//$'\n'/%0A}"
+          printf '%s' "${value}"
+        }
         # Mirrors parseVersion in scripts/changelog.ts — keep in sync. parseVersion is the canonical rule used downstream by extract-changelog-section.ts, prepare-release.ts, and refresh-self-pins.ts; a value accepted here that parseVersion would reject (or vice versa) re-introduces the schema/runtime gap this composite exists to close.
         SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
         if [ -z "${VERSION}" ]; then
@@ -27,17 +35,20 @@ runs:
           exit 1
         fi
         if [[ ! "${VERSION}" =~ ${SEMVER_RE} ]]; then
-          echo "::error::verify-release received a non-semver version input: ${VERSION} (expected MAJOR.MINOR.PATCH[-PRERELEASE]; no leading zeros, no '+' build metadata)"
+          escaped_version="$(escape_workflow_command "${VERSION}")"
+          echo "::error::verify-release received a non-semver version input: ${escaped_version} (expected MAJOR.MINOR.PATCH[-PRERELEASE]; no leading zeros, no '+' build metadata)"
           exit 1
         fi
         PKG_VERSION="$(jq -r .version package.json)"
         if [ "${VERSION}" != "${PKG_VERSION}" ]; then
-          echo "::error::input version=${VERSION} but package.json=${PKG_VERSION}"
+          escaped_pkg_version="$(escape_workflow_command "${PKG_VERSION}")"
+          echo "::error::input version=${VERSION} but package.json=${escaped_pkg_version}"
           exit 1
         fi
         CHANGELOG_VERSION="$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')" || true
         if [ "${VERSION}" != "${CHANGELOG_VERSION}" ]; then
-          echo "::error::input version=${VERSION} but top CHANGELOG section=[${CHANGELOG_VERSION}]"
+          escaped_changelog_version="$(escape_workflow_command "${CHANGELOG_VERSION}")"
+          echo "::error::input version=${VERSION} but top CHANGELOG section=[${escaped_changelog_version}]"
           exit 1
         fi
 

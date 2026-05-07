@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
 
@@ -71,6 +71,12 @@ function withTempPackage(
   }
 }
 
+function expectFailedAnnotation(result: SpawnSyncReturns<string>, stdoutLines: string[]): void {
+  expect(result.status).toBe(1);
+  expect(result.stderr).toBe("");
+  expect(result.stdout.split("\n").filter((line) => line.length > 0)).toEqual(stdoutLines);
+}
+
 describe("verify-lockfile-version composite", () => {
   it("keeps workflow-command escaping helpers in sync", async () => {
     const bodies = await Promise.all(
@@ -98,8 +104,7 @@ describe("verify-lockfile-version composite", () => {
           encoding: "utf-8",
         });
 
-        expect(result.status).toBe(1);
-        expect(result.stdout.split("\n").filter((line) => line.length > 0)).toEqual([
+        expectFailedAnnotation(result, [
           "::error::package.json=1.0.0%0A::warning::pkg but package-lock.json reports top=2.0.0%25done%0DCR root-pkg=3.0.0%0A::error::root",
         ]);
       },
@@ -122,8 +127,7 @@ describe("verify-lockfile-version composite", () => {
           encoding: "utf-8",
         });
 
-        expect(result.status).toBe(1);
-        expect(result.stdout.split("\n").filter((line) => line.length > 0)).toEqual([
+        expectFailedAnnotation(result, [
           "::error::package-lock.json is missing required version metadata (top='1.0.0%0A::warning::leak%25done%0DCR' root-pkg=''); lockfileVersion 3 must include both.",
         ]);
       },

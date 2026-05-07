@@ -308,6 +308,24 @@ describe("verify-release composite - validate version consistency", () => {
     );
   });
 
+  it("annotates a missing CHANGELOG.md as a dedicated error", async () => {
+    const script = extractStepRunBlock(await readSource(ACTION_PATH), "Validate version consistency");
+
+    withTempDir(
+      {
+        "package.json": JSON.stringify({ version: "1.0.0" }),
+      },
+      (cwd) => {
+        const result = runScript(script, cwd, { VERSION: "1.0.0" });
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain(
+          "::error::CHANGELOG.md not found in",
+        );
+        expect(result.stdout).not.toContain("top CHANGELOG section=[]");
+      },
+    );
+  });
+
   it("escapes malicious package.json version in error annotation", async () => {
     const script = extractStepRunBlock(await readSource(ACTION_PATH), "Validate version consistency");
 

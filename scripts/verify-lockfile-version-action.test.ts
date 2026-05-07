@@ -71,6 +71,21 @@ function withTempPackage(
   }
 }
 
+function withTempFiles(
+  files: Record<string, string>,
+  callback: (cwd: string) => void,
+): void {
+  const cwd = mkdtempSync(join(tmpdir(), "verify-lockfile-version-"));
+  try {
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(join(cwd, name), content, { encoding: "utf-8" });
+    }
+    callback(cwd);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
 function expectFailedAnnotation(result: SpawnSyncReturns<string>, stdoutLines: string[]): void {
   expect(result.status).toBe(1);
   expect(result.stderr).toBe("");
@@ -155,6 +170,112 @@ describe("verify-lockfile-version composite", () => {
         expectFailedAnnotation(result, [
           "::error::package-lock.json is missing required version metadata (top='' root-pkg='1.0.0%0A::warning::root%25done%0DCR'); lockfileVersion 3 must include both.",
         ]);
+      },
+    );
+  });
+
+  it("annotates jq failure when package.json is missing", async () => {
+    const script = extractSingleRunBlock(
+      await readSource(".github/actions/verify-lockfile-version/action.yaml"),
+    );
+
+    withTempFiles(
+      {
+        "package-lock.json": JSON.stringify({
+          version: "1.0.0",
+          packages: { "": { version: "1.0.0" } },
+        }),
+      },
+      (cwd) => {
+        const result = spawnSync("bash", ["-c", script], { cwd, encoding: "utf-8" });
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain(
+          "::error::Failed to read version from package.json; ensure the file exists and contains valid JSON",
+        );
+      },
+    );
+  });
+
+  it("annotates jq failure when package.json is invalid JSON", async () => {
+    const script = extractSingleRunBlock(
+      await readSource(".github/actions/verify-lockfile-version/action.yaml"),
+    );
+
+    withTempFiles(
+      {
+        "package.json": "not json",
+        "package-lock.json": JSON.stringify({
+          version: "1.0.0",
+          packages: { "": { version: "1.0.0" } },
+        }),
+      },
+      (cwd) => {
+        const result = spawnSync("bash", ["-c", script], { cwd, encoding: "utf-8" });
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain(
+          "::error::Failed to read version from package.json; ensure the file exists and contains valid JSON",
+        );
+      },
+    );
+  });
+
+  it("annotates a missing version field in package.json", async () => {
+    const script = extractSingleRunBlock(
+      await readSource(".github/actions/verify-lockfile-version/action.yaml"),
+    );
+
+    withTempPackage(
+      {
+        packageJson: { name: "pkg" },
+        packageLockJson: {
+          version: "1.0.0",
+          packages: { "": { version: "1.0.0" } },
+        },
+      },
+      (cwd) => {
+        const result = spawnSync("bash", ["-c", script], { cwd, encoding: "utf-8" });
+        expectFailedAnnotation(result, [
+          "::error::package.json is missing the required 'version' field",
+        ]);
+      },
+    );
+  });
+
+  it("annotates jq failure when package-lock.json is missing", async () => {
+    const script = extractSingleRunBlock(
+      await readSource(".github/actions/verify-lockfile-version/action.yaml"),
+    );
+
+    withTempFiles(
+      {
+        "package.json": JSON.stringify({ version: "1.0.0" }),
+      },
+      (cwd) => {
+        const result = spawnSync("bash", ["-c", script], { cwd, encoding: "utf-8" });
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain(
+          "::error::Failed to read version from package-lock.json; ensure the file exists and contains valid JSON",
+        );
+      },
+    );
+  });
+
+  it("annotates jq failure when package-lock.json is invalid JSON", async () => {
+    const script = extractSingleRunBlock(
+      await readSource(".github/actions/verify-lockfile-version/action.yaml"),
+    );
+
+    withTempFiles(
+      {
+        "package.json": JSON.stringify({ version: "1.0.0" }),
+        "package-lock.json": "not json",
+      },
+      (cwd) => {
+        const result = spawnSync("bash", ["-c", script], { cwd, encoding: "utf-8" });
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain(
+          "::error::Failed to read version from package-lock.json; ensure the file exists and contains valid JSON",
+        );
       },
     );
   });

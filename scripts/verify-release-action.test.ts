@@ -274,6 +274,40 @@ describe("verify-release composite - validate version consistency", () => {
     );
   });
 
+  it("annotates a missing version field in package.json", async () => {
+    const script = extractStepRunBlock(await readSource(ACTION_PATH), "Validate version consistency");
+
+    withTempDir(
+      {
+        "package.json": JSON.stringify({ name: "pkg" }),
+        "CHANGELOG.md": "## [1.0.0]\n",
+      },
+      (cwd) => {
+        const result = runScript(script, cwd, { VERSION: "1.0.0" });
+        expectFailedAnnotation(result, [
+          "::error::package.json is missing the required 'version' field",
+        ]);
+      },
+    );
+  });
+
+  it("treats an explicit null version field as missing", async () => {
+    const script = extractStepRunBlock(await readSource(ACTION_PATH), "Validate version consistency");
+
+    withTempDir(
+      {
+        "package.json": JSON.stringify({ version: null }),
+        "CHANGELOG.md": "## [1.0.0]\n",
+      },
+      (cwd) => {
+        const result = runScript(script, cwd, { VERSION: "1.0.0" });
+        expectFailedAnnotation(result, [
+          "::error::package.json is missing the required 'version' field",
+        ]);
+      },
+    );
+  });
+
   it("escapes malicious package.json version in error annotation", async () => {
     const script = extractStepRunBlock(await readSource(ACTION_PATH), "Validate version consistency");
 

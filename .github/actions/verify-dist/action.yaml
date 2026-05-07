@@ -1,18 +1,26 @@
 name: Verify dist is up to date
 description: Runs the bundle build and asserts that the committed dist/ matches source.
 
+inputs:
+  working-directory:
+    description: Repository directory to build and compare.
+    required: false
+    default: "."
+
 runs:
   using: composite
   steps:
     - name: Build
       shell: bash
       run: npm run build
+      working-directory: ${{ inputs.working-directory }}
 
     - name: Verify dist files exist
       shell: bash
       run: |
         test -f dist/prepare/main.js || (echo "::error::dist/prepare/main.js not found" && exit 1)
         test -f dist/publish/main.js || (echo "::error::dist/publish/main.js not found" && exit 1)
+      working-directory: ${{ inputs.working-directory }}
 
     - name: Check dist is up-to-date
       shell: bash
@@ -23,3 +31,4 @@ runs:
           echo "$status"
           exit 1
         fi
+      working-directory: ${{ inputs.working-directory }}

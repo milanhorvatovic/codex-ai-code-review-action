@@ -1,0 +1,103 @@
+name: Verify release
+description: Runs the full release validation sequence (build, lint, typecheck, tests, lockfile invariant, package/CHANGELOG version consistency) against the checked-out commit.
+
+inputs:
+  version:
+    description: Bare semver under test (e.g. 2.1.0 or 2.1.0-rc.1).
+    required: true
+  working-directory:
+    description: Repository directory to validate, relative to the workflow workspace.
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Validate version consistency
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # Neutralize values that may carry attacker-controlled content before echoing into
+        # ::error:: workflow commands. The same helper appears in
+        # .github/workflows/verify-release.yaml and
+        # .github/actions/verify-lockfile-version/action.yaml; keep the copies in sync.
+        escape_workflow_command() {
+          local value="$1"
+          value="${value//%/%25}"
+          value="${value//$'\r'/%0D}"
+          value="${value//$'\n'/%0A}"
+          printf '%s' "${value}"
+        }
+        escaped_version="$(escape_workflow_command "${VERSION}")"
+        # Mirrors parseVersion in scripts/changelog.ts — keep in sync. parseVersion is the canonical rule used downstream by extract-changelog-section.ts, prepare-release.ts, and refresh-self-pins.ts; a value accepted here that parseVersion would reject (or vice versa) re-introduces the schema/runtime gap this composite exists to close.
+        SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
+        if [ -z "${VERSION}" ]; then
+          echo "::error::verify-release received an empty version input"
+          exit 1
+        fi
+        if [[ ! "${VERSION}" =~ ${SEMVER_RE} ]]; then
+          echo "::error::verify-release received a non-semver version input: ${escaped_version} (expected MAJOR.MINOR.PATCH[-PRERELEASE]; no leading zeros, no '+' build metadata)"
+          exit 1
+        fi
+        PKG_VERSION="$(jq -r '.version // empty' package.json)" || {
+          echo "::error::Failed to read version from package.json; ensure the file exists and contains valid JSON"
+          exit 1
+        }
+        # `// empty` collapses both a missing `.version` key and an explicit `null`
+        # value to "" so the comparison below cannot succeed against the literal string
+        # "null" and surface a misleading mismatch annotation; treat the absence as its
+        # own diagnostic instead.
+        if [ -z "${PKG_VERSION}" ]; then
+          echo "::error::package.json is missing the required 'version' field"
+          exit 1
+        fi
+        if [ "${VERSION}" != "${PKG_VERSION}" ]; then
+          escaped_pkg_version="$(escape_workflow_command "${PKG_VERSION}")"
+          echo "::error::input version=${escaped_version} but package.json=${escaped_pkg_version}"
+          exit 1
+        fi
+        # Detect a missing CHANGELOG.md explicitly so the annotation surface mirrors
+        # the package.json guard above; without this, the grep pipeline would only leak
+        # its "No such file or directory" message to stderr and the mismatch branch
+        # below would emit a misleading "top CHANGELOG section=[]" diagnostic.
+        if [ ! -f CHANGELOG.md ]; then
+          escaped_working_directory="$(escape_workflow_command "$(pwd)")"
+          echo "::error::CHANGELOG.md not found in ${escaped_working_directory}; cannot verify the top section against the input version"
+          exit 1
+        fi
+        CHANGELOG_VERSION="$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')" || true
+        if [ "${VERSION}" != "${CHANGELOG_VERSION}" ]; then
+          escaped_changelog_version="$(escape_workflow_command "${CHANGELOG_VERSION}")"
+          echo "::error::input version=${escaped_version} but top CHANGELOG section=[${escaped_changelog_version}]"
+          exit 1
+        fi
+
+    - uses: ./.github/actions/setup-node-deps
+      with:
+        working-directory: ${{ inputs.working-directory }}
+
+    - uses: ./.github/actions/verify-dist
+      with:
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: Lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm run lint
+
+    - name: Type check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm run typecheck
+
+    - name: Run tests
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm test
+
+    - uses: ./.github/actions/verify-lockfile-version
+      with:
+        working-directory: ${{ inputs.working-directory }}

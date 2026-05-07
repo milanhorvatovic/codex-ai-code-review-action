@@ -14,14 +14,27 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
+        # Neutralize jq-extracted values before echoing into ::error:: workflow commands; in PR contexts package.json / package-lock.json are attacker-controlled and JSON strings can legally contain '%', CR, or LF, which would otherwise corrupt the annotation stream or inject additional workflow commands. Mirrors the helper in .github/actions/verify-release/action.yaml — keep in sync.
+        escape_workflow_command() {
+          local value="$1"
+          value="${value//%/%25}"
+          value="${value//$'\r'/%0D}"
+          value="${value//$'\n'/%0A}"
+          printf '%s' "${value}"
+        }
         PKG="$(jq -r .version package.json)"
         LOCK_TOP="$(jq -r '.version // empty' package-lock.json)"
         LOCK_ROOT_PKG="$(jq -r '.packages[""].version // empty' package-lock.json)"
         if [ -z "${LOCK_TOP}" ] || [ -z "${LOCK_ROOT_PKG}" ]; then
-          echo "::error::package-lock.json is missing required version metadata (top='${LOCK_TOP}' root-pkg='${LOCK_ROOT_PKG}'); lockfileVersion 3 must include both."
+          escaped_lock_top="$(escape_workflow_command "${LOCK_TOP}")"
+          escaped_lock_root_pkg="$(escape_workflow_command "${LOCK_ROOT_PKG}")"
+          echo "::error::package-lock.json is missing required version metadata (top='${escaped_lock_top}' root-pkg='${escaped_lock_root_pkg}'); lockfileVersion 3 must include both."
           exit 1
         fi
         if [ "${PKG}" != "${LOCK_TOP}" ] || [ "${PKG}" != "${LOCK_ROOT_PKG}" ]; then
-          echo "::error::package.json=${PKG} but package-lock.json reports top=${LOCK_TOP} root-pkg=${LOCK_ROOT_PKG}"
+          escaped_pkg="$(escape_workflow_command "${PKG}")"
+          escaped_lock_top="$(escape_workflow_command "${LOCK_TOP}")"
+          escaped_lock_root_pkg="$(escape_workflow_command "${LOCK_ROOT_PKG}")"
+          echo "::error::package.json=${escaped_pkg} but package-lock.json reports top=${escaped_lock_top} root-pkg=${escaped_lock_root_pkg}"
           exit 1
         fi

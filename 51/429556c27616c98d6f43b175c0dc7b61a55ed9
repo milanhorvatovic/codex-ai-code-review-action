@@ -1,0 +1,20 @@
+.github/workflows/verify-release.yaml
+  s_905582e823b3fd::t_bb78b6130e5b9c 30-31,35-36,39-40
+  s_905582e823b3fd::t_702f5dbc2e8b81 32-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "51429556c27616c98d6f43b175c0dc7b61a55ed9",
+  "prompts": {},
+  "sessions": {
+    "s_905582e823b3fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dff9c-a6c7-7243-8868-c028059fdcbd",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

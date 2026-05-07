@@ -1,0 +1,20 @@
+scripts/verify-lockfile-version-action.test.ts
+  s_8bfe6442483d23::t_58778ceedf12a4 5,74
+  s_8bfe6442483d23::t_db0da6d4769a4f 75-79,107,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "489030b0e3b89d0cbeac809fcf7cf6b727d6c834",
+  "prompts": {},
+  "sessions": {
+    "s_8bfe6442483d23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e01c3-b2b5-7313-a848-3b1af9c0455b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

@@ -46,7 +46,10 @@ runs:
           echo "::error::Failed to read version from package.json; ensure the file exists and contains valid JSON"
           exit 1
         }
-        # `// empty` collapses both a missing `.version` key and an explicit `null` value to "" so the comparison below cannot succeed against the literal string "null" and surface a misleading mismatch annotation; treat the absence as its own diagnostic instead.
+        # `// empty` collapses both a missing `.version` key and an explicit `null`
+        # value to "" so the comparison below cannot succeed against the literal string
+        # "null" and surface a misleading mismatch annotation; treat the absence as its
+        # own diagnostic instead.
         if [ -z "${PKG_VERSION}" ]; then
           echo "::error::package.json is missing the required 'version' field"
           exit 1
@@ -56,7 +59,10 @@ runs:
           echo "::error::input version=${escaped_version} but package.json=${escaped_pkg_version}"
           exit 1
         fi
-        # Detect a missing CHANGELOG.md explicitly so the annotation surface mirrors the package.json guard above; without this, the grep pipeline would only leak its "No such file or directory" message to stderr and the mismatch branch below would emit a misleading "top CHANGELOG section=[]" diagnostic.
+        # Detect a missing CHANGELOG.md explicitly so the annotation surface mirrors
+        # the package.json guard above; without this, the grep pipeline would only leak
+        # its "No such file or directory" message to stderr and the mismatch branch
+        # below would emit a misleading "top CHANGELOG section=[]" diagnostic.
         if [ ! -f CHANGELOG.md ]; then
           escaped_working_directory="$(escape_workflow_command "$(pwd)")"
           echo "::error::CHANGELOG.md not found in ${escaped_working_directory}; cannot verify the top section against the input version"

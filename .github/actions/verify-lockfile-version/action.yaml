@@ -26,7 +26,10 @@ runs:
           value="${value//$'\n'/%0A}"
           printf '%s' "${value}"
         }
-        # Each jq read is guarded so a missing or malformed JSON file surfaces as a workflow annotation instead of a silent set-e exit. `.version // empty` on package.json collapses a missing key or explicit null value to "" so a literal "null" cannot reach the mismatch comparison below.
+        # Each jq read is guarded so a missing or malformed JSON file surfaces as a
+        # workflow annotation instead of a silent set-e exit. `.version // empty` on
+        # package.json collapses a missing key or explicit null value to "" so a literal
+        # "null" cannot reach the mismatch comparison below.
         PKG="$(jq -r '.version // empty' package.json)" || {
           echo "::error::Failed to read version from package.json; ensure the file exists and contains valid JSON"
           exit 1

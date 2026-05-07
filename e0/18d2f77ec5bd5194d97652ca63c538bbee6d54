@@ -1,0 +1,19 @@
+scripts/verify-lockfile-version-action.test.ts
+  s_f66440a4c4797e::t_885d8a8501d1f0 1-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "e018d2f77ec5bd5194d97652ca63c538bbee6d54",
+  "prompts": {},
+  "sessions": {
+    "s_f66440a4c4797e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e019d-9ff7-7723-8178-6a9ced4cec72",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

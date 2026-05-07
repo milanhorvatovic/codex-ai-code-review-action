@@ -1,0 +1,20 @@
+.github/workflows/verify-release.yaml
+  s_5ad1441dfdd18e::t_c60cb64cc04667 31
+  s_5ad1441dfdd18e::t_57d13136c42ce4 42-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "da68998f1ca5a1ed30544a1d8d7856b2338caec3",
+  "prompts": {},
+  "sessions": {
+    "s_5ad1441dfdd18e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1fbcd1d48ffe7sf1ukm7HLQHd9",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

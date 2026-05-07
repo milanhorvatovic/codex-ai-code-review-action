@@ -1,0 +1,15 @@
+scripts/verify-release-action.test.ts
+  ai_agent 9,11,45,60,75,92,108,124,140,156,173,190,207,224,242,259,276,295,313,332,349,370
+scripts/verify-release-workflow.test.ts
+  ai_agent 9,11,44,51,58,65,73,81,89,98
+scripts/verify-lockfile-version-action.test.ts
+  ai_agent 9-10,59,66,92,115,140,162,185,207,229,248
+scripts/yaml-test-helpers.ts
+  ai_agent 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "e3b2319ce03f50acfc9694e320e5684619a3dab2",
+  "prompts": {}
+}

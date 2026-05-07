@@ -1,0 +1,19 @@
+.github/actions/verify-release/action.yaml
+  s_cc474c6821624b::t_648dfa279057ef 61-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "5ad24e3d85889d55454af8748748286191efbd5d",
+  "prompts": {},
+  "sessions": {
+    "s_cc474c6821624b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e02b9-f13d-7ea0-99c5-e68e51fd943b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

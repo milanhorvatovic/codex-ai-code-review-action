@@ -241,6 +241,28 @@ describe("verify-lockfile-version composite", () => {
     );
   });
 
+  it("treats an explicit null version field as missing", async () => {
+    const script = extractSingleRunBlock(
+      await readSource(".github/actions/verify-lockfile-version/action.yaml"),
+    );
+
+    withTempPackage(
+      {
+        packageJson: { version: null },
+        packageLockJson: {
+          version: "1.0.0",
+          packages: { "": { version: "1.0.0" } },
+        },
+      },
+      (cwd) => {
+        const result = spawnSync("bash", ["-c", script], { cwd, encoding: "utf-8" });
+        expectFailedAnnotation(result, [
+          "::error::package.json is missing the required 'version' field",
+        ]);
+      },
+    );
+  });
+
   it("annotates jq failure when package-lock.json is missing", async () => {
     const script = extractSingleRunBlock(
       await readSource(".github/actions/verify-lockfile-version/action.yaml"),

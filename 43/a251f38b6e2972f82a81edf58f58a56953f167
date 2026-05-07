@@ -1,0 +1,21 @@
+scripts/verify-release-action.test.ts
+  s_517f5ae8d72921::t_f45da96d932efa 289-291
+  s_517f5ae8d72921::t_71c8fc7180ae35 330-332
+  s_517f5ae8d72921::t_355175f32bdf18 1-288,292-329,333-351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "43a251f38b6e2972f82a81edf58f58a56953f167",
+  "prompts": {},
+  "sessions": {
+    "s_517f5ae8d72921": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1fe37a61bffeRmf63gUlIFlqJr",
+        "model": "unknown"
+      },
+      "human_author": "Milan Horvatovič <milan.horvatovic@gmail.com>"
+    }
+  }
+}

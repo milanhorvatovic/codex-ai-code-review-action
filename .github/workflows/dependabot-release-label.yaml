@@ -7,11 +7,16 @@ name: Dependabot Release Label
 # group we configure) inconsistently apply those labels — so the required
 # `verify-pr-release-label` check fails and auto-merge cannot complete.
 #
-# Derives the update-type via `dependabot/fetch-metadata` and adds the matching
-# release label only when no `release: *` label is already present, so a
-# maintainer's manual override (e.g. promoting to `release: skip` on an infra-
-# only bump) wins. Labels are queried at runtime rather than read from the
-# event payload to avoid a TOCTOU race against a concurrent manual label edit.
+# Mirrors the effective-update-type derivation from `dependabot-auto-merge.yaml`
+# so SHA→SHA same-version dogfood self-reference bumps (which `fetch-metadata`
+# conservatively reports as semver-major) classify as patch here too — keeping
+# the label in lockstep with the merge policy. A pre-add label query plus a
+# post-add recheck bracket `gh pr edit`: the pre-add query skips when a label
+# is already present, the post-add recheck rolls back the workflow-applied
+# label if a maintainer's manual `release: *` raced into the check-then-act
+# window, leaving the manual override intact and a single release label on the
+# PR. (A maintainer applying the *same* label we'd compute is a set-semantics
+# no-op — the PR ends up with one label and no rollback fires.)
 
 on:
   pull_request:
@@ -36,22 +41,71 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
+      # Walk `updated-dependencies-json` and pick the most-severe update-type
+      # after excluding the dogfood self-reference *only* when its bump is
+      # SHA-only same-version (`prevVersion == newVersion`). Identical
+      # reasoning to dependabot-auto-merge.yaml: `fetch-metadata` reports those
+      # SHA→SHA bumps as `version-update:semver-major`, which would otherwise
+      # cause this backstop to apply `release: major` while the merge policy
+      # treats the same PR as patch. Real major bumps of the self-reference
+      # still classify as semver-major. The self-reference is identified via
+      # `github.repository` so a rename/transfer/fork picks up the new name
+      # automatically.
+      - name: Derive effective update-type
+        id: effective
+        env:
+          SELF_DEPENDENCY: ${{ github.repository }}
+          UPDATED_JSON: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          set -euo pipefail
+          effective=$(jq -r --arg self "$SELF_DEPENDENCY" '
+            [.[]
+              | select(.dependencyName != $self or .prevVersion != .newVersion)
+              | .updateType]
+            | if any(. == "version-update:semver-major") then "version-update:semver-major"
+              elif any(. == "version-update:semver-minor") then "version-update:semver-minor"
+              elif any(. == "version-update:semver-patch") then "version-update:semver-patch"
+              else "version-update:semver-patch"
+              end
+          ' <<<"$UPDATED_JSON")
+          echo "update-type=$effective" >> "$GITHUB_OUTPUT"
+
       - name: Add release label if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          UPDATE_TYPE: ${{ steps.effective.outputs.update-type }}
         run: |
           set -euo pipefail
-          existing=$(gh pr view "$PR_URL" --json labels \
-            --jq '[.labels[].name | select(startswith("release: "))] | length')
-          if [ "$existing" != "0" ]; then
+
+          count_release_labels() {
+            gh pr view "$PR_URL" --json labels \
+              --jq '[.labels[].name | select(startswith("release: "))] | length'
+          }
+
+          if [ "$(count_release_labels)" != "0" ]; then
             echo "Release label already present; nothing to do."
             exit 0
           fi
+
           case "$UPDATE_TYPE" in
             version-update:semver-major) label="release: major" ;;
             version-update:semver-minor) label="release: minor" ;;
             *)                            label="release: patch" ;;
           esac
+
           gh pr edit "$PR_URL" --add-label "$label"
+
+          # Post-add recheck closes the check-then-act window left by the
+          # pre-add query above. If a maintainer applied a different
+          # `release: *` label between that query and `gh pr edit --add-label`,
+          # the PR now carries two release labels and `verify-pr-release-label`
+          # would reject it. Roll back the label this workflow added so the
+          # manual override wins. We only ever remove `$label` (the one we
+          # just added) — never another label — so a concurrent automation
+          # that applied the *same* label produces a single label by set
+          # semantics, the count stays at 1, and no rollback fires.
+          if [ "$(count_release_labels)" -gt 1 ]; then
+            echo "::warning::A different release label appears to have been applied during the add window; removing the workflow-applied '$label' so the manual override wins."
+            gh pr edit "$PR_URL" --remove-label "$label"
+          fi

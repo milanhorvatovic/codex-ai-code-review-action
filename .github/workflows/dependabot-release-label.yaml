@@ -1,0 +1,118 @@
+name: Dependabot Release Label
+
+# Backstop that adds the `release: <level>` label to Dependabot PRs that did
+# not inherit one from `.github/dependabot.yaml`. Configured-group PRs (npm,
+# github-actions) pick up `release: patch` from the labels list there, but
+# Dependabot security-update PRs (the built-in `npm_and_yarn` group, not a
+# group we configure) inconsistently apply those labels — so the required
+# `verify-pr-release-label` check fails and auto-merge cannot complete.
+#
+# Mirrors the effective-update-type derivation from `dependabot-auto-merge.yaml`
+# so SHA→SHA same-version dogfood self-reference bumps (which `fetch-metadata`
+# conservatively reports as semver-major) classify as patch here too — keeping
+# the label in lockstep with the merge policy. A pre-add label query plus a
+# post-add recheck bracket `gh pr edit`: the pre-add query skips when a label
+# is already present, the post-add recheck rolls back the workflow-applied
+# label if a maintainer's manual `release: *` raced into the check-then-act
+# window, leaving the manual override intact and a single release label on the
+# PR. (A maintainer applying the *same* label we'd compute is a set-semantics
+# no-op — the PR ends up with one label and no rollback fires.)
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+
+# `pull-requests: write` covers `gh pr edit --add-label/--remove-label` for
+# *existing* labels on a PR — same scope `actions/labeler` ships with. The
+# four release labels referenced below (`release: major/minor/patch/skip`)
+# already exist on the repo, so we never hit the create-label path that would
+# also require `issues: write`. Keep the scope minimal: granting
+# `issues: write` would also let this workflow modify unrelated issue labels
+# and comments, which is broader than the backstop needs.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  add-release-label:
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      # Walk `updated-dependencies-json` and pick the most-severe update-type
+      # after excluding the dogfood self-reference *only* when its bump is
+      # SHA-only same-version (`prevVersion == newVersion`). Identical
+      # reasoning to dependabot-auto-merge.yaml: `fetch-metadata` reports those
+      # SHA→SHA bumps as `version-update:semver-major`, which would otherwise
+      # cause this backstop to apply `release: major` while the merge policy
+      # treats the same PR as patch. Real major bumps of the self-reference
+      # still classify as semver-major. The self-reference is identified via
+      # `github.repository` so a rename/transfer/fork picks up the new name
+      # automatically.
+      - name: Derive effective update-type
+        id: effective
+        env:
+          SELF_DEPENDENCY: ${{ github.repository }}
+          UPDATED_JSON: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          set -euo pipefail
+          effective=$(jq -r --arg self "$SELF_DEPENDENCY" '
+            [.[]
+              | select(.dependencyName != $self or .prevVersion != .newVersion)
+              | .updateType]
+            | if any(. == "version-update:semver-major") then "version-update:semver-major"
+              elif any(. == "version-update:semver-minor") then "version-update:semver-minor"
+              elif any(. == "version-update:semver-patch") then "version-update:semver-patch"
+              else "version-update:semver-patch"
+              end
+          ' <<<"$UPDATED_JSON")
+          echo "update-type=$effective" >> "$GITHUB_OUTPUT"
+
+      - name: Add release label if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.effective.outputs.update-type }}
+        run: |
+          set -euo pipefail
+
+          count_release_labels() {
+            gh pr view "$PR_URL" --json labels \
+              --jq '[.labels[].name | select(startswith("release: "))] | length'
+          }
+
+          if [ "$(count_release_labels)" != "0" ]; then
+            echo "Release label already present; nothing to do."
+            exit 0
+          fi
+
+          case "$UPDATE_TYPE" in
+            version-update:semver-major) label="release: major" ;;
+            version-update:semver-minor) label="release: minor" ;;
+            *)                            label="release: patch" ;;
+          esac
+
+          gh pr edit "$PR_URL" --add-label "$label"
+
+          # Post-add recheck closes the check-then-act window left by the
+          # pre-add query above. If a maintainer applied a different
+          # `release: *` label between that query and `gh pr edit --add-label`,
+          # the PR now carries two release labels and `verify-pr-release-label`
+          # would reject it. Roll back the label this workflow added so the
+          # manual override wins. We only ever remove `$label` (the one we
+          # just added) — never another label — so a concurrent automation
+          # that applied the *same* label produces a single label by set
+          # semantics, the count stays at 1, and no rollback fires.
+          if [ "$(count_release_labels)" -gt 1 ]; then
+            echo "::warning::A different release label appears to have been applied during the add window; removing the workflow-applied '$label' so the manual override wins."
+            gh pr edit "$PR_URL" --remove-label "$label"
+          fi

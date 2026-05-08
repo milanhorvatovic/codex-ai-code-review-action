@@ -24,6 +24,13 @@ on:
       - opened
       - reopened
 
+# `pull-requests: write` covers `gh pr edit --add-label/--remove-label` for
+# *existing* labels on a PR — same scope `actions/labeler` ships with. The
+# four release labels referenced below (`release: major/minor/patch/skip`)
+# already exist on the repo, so we never hit the create-label path that would
+# also require `issues: write`. Keep the scope minimal: granting
+# `issues: write` would also let this workflow modify unrelated issue labels
+# and comments, which is broader than the backstop needs.
 permissions:
   contents: read
   pull-requests: write

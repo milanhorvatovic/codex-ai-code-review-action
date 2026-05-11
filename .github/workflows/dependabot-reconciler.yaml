@@ -135,14 +135,14 @@ jobs:
           }
 
           # Fetches the PR's first commit message (the Dependabot-authored one
-          # carrying the `updated-dependencies:` block) into `commit_msg`.
-          # Returns 0 on success, 1 on API failure — callers fail closed.
+          # carrying the `updated-dependencies:` block) and echoes it to stdout.
+          # Callers capture via command substitution. Returns 0 on success, 1
+          # on API failure — callers fail closed by checking the exit status.
+          # Explicit return-via-stdout rather than mutating a caller-scoped
+          # variable so the data flow doesn't depend on bash dynamic scoping.
           fetch_commit_message() {
             local pr=$1
-            if ! commit_msg=$(gh api "repos/$GH_REPO/pulls/$pr/commits" --jq '.[0].commit.message'); then
-              return 1
-            fi
-            return 0
+            gh api "repos/$GH_REPO/pulls/$pr/commits" --jq '.[0].commit.message'
           }
 
           # Fail-closed security-review re-check, called immediately before every
@@ -164,11 +164,10 @@ jobs:
           # neither the re-approve path nor the arm-auto-merge path can act on a
           # PR a maintainer left for manual review (semver-major bumps, excluded
           # `openai/codex-action`). Returns 0 when the PR is eligible, 1 when a
-          # gate refuses, 2 on commit-metadata fetch failure (fail-closed). Relies
-          # on dynamic scoping for `commit_msg` declared `local` in `reconcile_pr`.
+          # gate refuses, 2 on commit-metadata fetch failure (fail-closed).
           check_dependency_gates() {
-            local pr=$1 stage=$2
-            if ! fetch_commit_message "$pr"; then
+            local pr=$1 stage=$2 commit_msg
+            if ! commit_msg=$(fetch_commit_message "$pr"); then
               echo "::warning::PR #${pr}: failed to fetch commit metadata; skipping ${stage} (fail-closed)."
               return 2
             fi
@@ -226,7 +225,7 @@ jobs:
           # `set -e` at the top level would otherwise kill the whole run.
           reconcile_pr() {
             local pr=$1
-            local state merge_state mergeable review has_auto srs commit_msg
+            local state merge_state mergeable review has_auto srs
 
             if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
               echo "::warning::PR #${pr}: failed to fetch PR state; skipping this iteration."

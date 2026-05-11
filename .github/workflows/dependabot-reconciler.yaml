@@ -46,12 +46,12 @@ name: Dependabot Reconciler
 #   - Skips arming auto-merge for PRs containing a semver-major bump or the
 #     excluded dependency `openai/codex-action`. Detection reads the PR's first
 #     commit message — Dependabot's authoritative `updated-dependencies:` block.
-#     Conservative versus the existing workflow's `fetch-metadata`-based logic:
-#     a self-reference SHA→SHA same-version bump (which fetch-metadata reports as
-#     semver-major) is treated as ineligible here too. The existing PR-event
-#     workflow already armed those at open time, so the reconciler's arm path
-#     never needs to fire for them — only the BEHIND / re-approve paths do, and
-#     those don't depend on these gates.
+#     Mirrors the self-reference SHA→SHA same-version exemption derived by the
+#     auto-merge workflow's "Derive effective update-type" step in
+#     `dependabot-auto-merge.yaml`: a same-version bump of the dogfood self-
+#     reference (which fetch-metadata reports as semver-major) is treated as
+#     patch-equivalent so the reconciler's re-approve path doesn't strand a PR
+#     the auto-merge workflow already armed at open time.
 #
 # Failure isolation: per-PR work runs inside a function that handles transient
 # `gh` failures with explicit warnings and early returns rather than letting

@@ -185,8 +185,9 @@ jobs:
 
           # DIRTY-path handler (real merge conflict). Posts the one-shot
           # `@dependabot recreate` nudge, gated by the marker comment so we
-          # don't spam the PR. Extracted into a helper so callers can re-enter
-          # the same logic from multiple paths instead of duplicating the body.
+          # don't spam the PR. Extracted into a helper so the BEHIND→DIRTY
+          # transition discovered after `update-branch` can re-enter the same
+          # logic instead of waiting for the next reconciler tick.
           #
           # The marker lookup uses server-side jq with `--arg` so the literal
           # HTML-comment characters in $RECREATE_MARKER never participate in
@@ -249,37 +250,74 @@ jobs:
             review=$(jq -r '.reviewDecision // ""' <<<"$state")
             has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
 
-            case "$merge_state" in
-              BEHIND)
-                # Re-check the security-review state immediately before mutating
-                # the PR branch — a maintainer may have applied the label since
-                # the top-of-function check, and update-branch is itself a write.
-                if ! gate_security_review "$pr" "update-branch"; then
-                  return 0
+            if [ "$merge_state" = "BEHIND" ]; then
+              # Re-check the security-review state immediately before mutating
+              # the PR branch — a maintainer may have applied the label since
+              # the top-of-function check, and update-branch is itself a write.
+              if ! gate_security_review "$pr" "update-branch"; then
+                return 0
+              fi
+              echo "BEHIND main; calling update-branch."
+              if ! gh pr update-branch "$pr"; then
+                echo "::warning::PR #${pr}: update-branch failed (transient API error or branch protection refused the update)."
+                return 0
+              fi
+              # Refresh state: the merge commit may have dismissed the bot
+              # review, flipped `mergeable`, or invalidated `autoMergeRequest`.
+              # Without a refresh the downstream decisions operate on stale
+              # data and could arm auto-merge against a head that no longer
+              # satisfies the ruleset. We also re-read `mergeStateStatus` so a
+              # BEHIND→DIRTY transition (the merge commit produced a real
+              # conflict) is handled this tick instead of waiting an hour.
+              if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
+                echo "::warning::PR #${pr}: state refresh after update-branch failed; skipping downstream actions."
+                return 0
+              fi
+              merge_state=$(jq -r '.mergeStateStatus' <<<"$state")
+              mergeable=$(jq -r '.mergeable' <<<"$state")
+              review=$(jq -r '.reviewDecision // ""' <<<"$state")
+              has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
+              if [ "$merge_state" = "DIRTY" ]; then
+                handle_dirty "$pr"
+                return 0
+              fi
+              # GitHub recomputes `mergeable` asynchronously after a merge
+              # commit lands on the PR branch. Immediately after a successful
+              # `update-branch` it commonly reports `UNKNOWN` for a few seconds
+              # — the arm-auto-merge gate below requires `MERGEABLE`, so without
+              # a brief poll we'd skip this PR every tick the recompute hadn't
+              # converged and a Monday batch would take multiple hours to drain.
+              # Three retries × 10 s is bounded (≤30 s per BEHIND PR) and only
+              # runs on the small subset of PRs that just went through
+              # update-branch this tick.
+              local attempt
+              for attempt in 1 2 3; do
+                if [ "$mergeable" != "UNKNOWN" ]; then
+                  break
                 fi
-                echo "BEHIND main; calling update-branch."
-                if ! gh pr update-branch "$pr"; then
-                  echo "::warning::PR #${pr}: update-branch failed (transient API error or branch protection refused the update)."
-                  return 0
-                fi
-                # Refresh state: the merge commit may have dismissed the bot
-                # review, flipped `mergeable`, or invalidated `autoMergeRequest`.
-                # Without a refresh the downstream decisions operate on stale
-                # data and could arm auto-merge against a head that no longer
-                # satisfies the ruleset.
+                sleep 10
+                echo "PR #${pr}: mergeable=UNKNOWN after update-branch; re-querying (attempt ${attempt}/3)."
                 if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
-                  echo "::warning::PR #${pr}: state refresh after update-branch failed; skipping downstream actions."
-                  return 0
+                  echo "::warning::PR #${pr}: state re-query during mergeable poll failed; continuing with last-known values."
+                  break
                 fi
+                merge_state=$(jq -r '.mergeStateStatus' <<<"$state")
                 mergeable=$(jq -r '.mergeable' <<<"$state")
                 review=$(jq -r '.reviewDecision // ""' <<<"$state")
                 has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
-                ;;
-              DIRTY)
-                handle_dirty "$pr"
-                return 0
-                ;;
-            esac
+                if [ "$merge_state" = "DIRTY" ]; then
+                  handle_dirty "$pr"
+                  return 0
+                fi
+              done
+            elif [ "$merge_state" = "DIRTY" ]; then
+              # Real conflict — Dependabot's auto-rebase can't resolve it.
+              # Drop a one-shot `@dependabot recreate` so Dependabot rebuilds
+              # the PR from scratch. Marker-gated to avoid spamming the PR
+              # on every hourly tick.
+              handle_dirty "$pr"
+              return 0
+            fi
 
             # Re-approve only when auto-merge is already armed. That signal
             # means dependabot-auto-merge.yaml previously cleared every policy

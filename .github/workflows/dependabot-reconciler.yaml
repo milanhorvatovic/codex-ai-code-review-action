@@ -51,7 +51,9 @@ name: Dependabot Reconciler
 #     `dependabot-auto-merge.yaml`: a same-version bump of the dogfood self-
 #     reference (which fetch-metadata reports as semver-major) is treated as
 #     patch-equivalent so the reconciler's re-approve path doesn't strand a PR
-#     the auto-merge workflow already armed at open time.
+#     the auto-merge workflow already armed at open time. The exemption is
+#     verified against the commit-trailer metadata, not the PR title alone, so
+#     a mutated title cannot bypass the dependency gate.
 #
 # Failure isolation: per-PR work runs inside a function that handles transient
 # `gh` failures with explicit warnings and early returns rather than letting
@@ -236,12 +238,19 @@ jobs:
           # the reconciler refuse to re-approve — stranding the prior policy
           # decision indefinitely.
           #
-          # The exemption checks the PR title — Dependabot's canonical single-
-          # dep title format is `chore: bump <name> from <prev> to <new>`, and
-          # the self-reference is always a single-dep PR because it's listed
-          # under `exclude-patterns` in `.github/dependabot.yaml` (so it never
-          # joins the github-actions group). When `<name>` is the self-
-          # reference and `<prev>` equals `<new>`, treat as eligible.
+          # The exemption is verified against two sources to defeat title-
+          # mutability attacks: (a) parse the PR title — Dependabot's canonical
+          # single-dep title format is `chore: bump <name> from <prev> to <new>`
+          # — to extract the claimed `<name>`, `<prev>`, `<new>` (the self-
+          # reference is always a single-dep PR because it's listed under
+          # `exclude-patterns` in `.github/dependabot.yaml`, so it never joins
+          # the github-actions group); (b) cross-check against the already-
+          # fetched commit metadata, requiring exactly one `dependency-name:`
+          # trailer line that names the self-reference. The PR title alone is
+          # mutable — a maintainer or write-scoped bot can edit it, so a
+          # forged title on an unrelated semver-major Dependabot PR must not
+          # be sufficient to clear the gate. A title-vs-metadata mismatch
+          # falls through to the semver-major rejection (`return 1`).
           check_dependency_gates() {
             local pr=$1 stage=$2 commit_msg pr_title self_ref="$GH_REPO"
             if ! commit_msg=$(fetch_commit_message "$pr"); then
@@ -258,7 +267,8 @@ jobs:
               return 0
             fi
             # Semver-major present. Check if this is the self-reference same-
-            # version exemption by parsing the PR title.
+            # version exemption by parsing the PR title AND cross-checking
+            # against the commit-trailer metadata.
             if ! pr_title=$(gh pr view "$pr" --json title --jq '.title'); then
               echo "::warning::PR #${pr}: failed to fetch PR title for self-reference same-version check; failing closed and rejecting ${stage}."
               return 2
@@ -266,8 +276,24 @@ jobs:
             if [[ "$pr_title" =~ bump[[:space:]]+([^[:space:]]+)[[:space:]]+from[[:space:]]+([^[:space:]]+)[[:space:]]+to[[:space:]]+([^[:space:]]+) ]]; then
               local dep_name="${BASH_REMATCH[1]}" prev_ver="${BASH_REMATCH[2]}" new_ver="${BASH_REMATCH[3]}"
               if [ "$dep_name" = "$self_ref" ] && [ "$prev_ver" = "$new_ver" ]; then
-                echo "PR #${pr}: self-reference SHA→SHA same-version bump (${prev_ver}); treating as patch-equivalent, allowing ${stage}."
-                return 0
+                # Cross-check the title's claim against the commit trailers.
+                # The Dependabot commit message lists every updated dep as a
+                # YAML-style `dependency-name: <name>` line; counting them
+                # establishes single-dep (grouped PRs would have >1, and the
+                # self-reference is excluded from the github-actions group),
+                # and the named dep on that single line must equal the self-
+                # reference for the exemption to be honored. Any mismatch
+                # (multi-dep PR, different dep, or absent metadata) is
+                # treated as a forged title and falls through to the
+                # semver-major rejection below.
+                local dep_name_count metadata_dep
+                dep_name_count=$(grep -c "dependency-name:" <<<"$commit_msg" || true)
+                metadata_dep=$(grep -m1 "dependency-name:" <<<"$commit_msg" | sed -e 's/.*dependency-name:[[:space:]]*//' -e 's/[[:space:]]*$//')
+                if [ "$dep_name_count" = "1" ] && [ "$metadata_dep" = "$self_ref" ]; then
+                  echo "PR #${pr}: self-reference SHA→SHA same-version bump (${prev_ver}); treating as patch-equivalent, allowing ${stage}."
+                  return 0
+                fi
+                echo "::warning::PR #${pr}: PR title claims self-reference same-version bump but commit metadata does not confirm (dependency-name lines=${dep_name_count}, first metadata dep='${metadata_dep}'); rejecting exemption."
               fi
             fi
             echo "PR #${pr}: contains a semver-major update; manual review required, not performing ${stage}."

@@ -21,7 +21,14 @@ name: Dependabot Reconciler
 #      transient GitHub API errors.
 #
 # Triggers:
-#   - `push: main` reacts in seconds when a merge advances the base branch.
+#   - `workflow_run` on `Dependabot Auto-Merge` is the primary reactive trigger.
+#     The `push: main` event is suppressed when `secrets.GITHUB_TOKEN` causes the
+#     push (GitHub's anti-loop rule), which is exactly what happens when the
+#     auto-merge workflow's synchronous `gh pr merge --squash` lands a Dependabot
+#     PR — so `push: main` alone would miss the most important case. The
+#     `workflow_run` lifecycle event is NOT subject to that suppression.
+#   - `push: main` covers the remaining cases (human merges through the GitHub UI,
+#     PAT-authenticated merges, force pushes by a maintainer with admin rights).
 #   - `schedule` is the backstop that catches dropped events and transient failures.
 #   - `workflow_dispatch` is the manual escape hatch.
 #
@@ -54,10 +61,20 @@ on:
   push:
     branches:
       - main
+  workflow_run:
+    # Fires when the auto-merge workflow's run completes regardless of which
+    # token caused it. Required to react to `GITHUB_TOKEN`-driven merges, where
+    # the resulting `push: main` event is suppressed by GitHub's anti-loop rule.
+    # The workflow file must be on the default branch for this trigger to be
+    # registered — that happens once this PR merges.
+    workflows:
+      - "Dependabot Auto-Merge"
+    types:
+      - completed
   schedule:
-    # Hourly. The `push: main` trigger handles the BEHIND-after-merge case
-    # reactively; the cron catches dropped events, transient API errors, and
-    # silent auto-merge enable failures that no PR event would re-fire.
+    # Hourly. The reactive triggers above handle the BEHIND-after-merge case
+    # in seconds; the cron catches dropped events, transient API errors, and
+    # silent auto-merge enable failures that no event would re-fire.
     - cron: "0 * * * *"
   workflow_dispatch:
 
@@ -128,6 +145,21 @@ jobs:
             return 0
           }
 
+          # Fail-closed security-review re-check, called immediately before every
+          # state-mutating action (update-branch, recreate comment, re-approve,
+          # arm auto-merge). Returns 0 only when the label state is definitively
+          # `false`; "true" and "unknown" both return non-zero with a warning so
+          # a label applied after the top-of-loop check cannot race past us.
+          gate_security_review() {
+            local pr=$1 stage=$2 srs
+            srs=$(security_review_state "$pr")
+            if [ "$srs" != "false" ]; then
+              echo "::warning::PR #${pr}: security-review state '$srs' immediately before ${stage}; skipping (fail-closed)."
+              return 1
+            fi
+            return 0
+          }
+
           # Per-PR reconciliation. Always returns 0 — every failure path emits a
           # `::warning::` and returns early so the outer loop continues with the
           # next PR. Never let an unhandled non-zero exit escape this function;
@@ -160,6 +192,12 @@ jobs:
 
             case "$merge_state" in
               BEHIND)
+                # Re-check the security-review state immediately before mutating
+                # the PR branch — a maintainer may have applied the label since
+                # the top-of-function check, and update-branch is itself a write.
+                if ! gate_security_review "$pr" "update-branch"; then
+                  return 0
+                fi
                 echo "BEHIND main; calling update-branch."
                 if ! gh pr update-branch "$pr"; then
                   echo "::warning::PR #${pr}: update-branch failed (transient API error or branch protection refused the update)."
@@ -198,6 +236,13 @@ jobs:
                 if grep -qF "$RECREATE_MARKER" <<<"$comments"; then
                   echo "Recreate comment already posted; skipping."
                 else
+                  # Re-check the security-review state immediately before
+                  # commenting — posting `@dependabot recreate` on a PR a
+                  # maintainer just flagged for manual review would defeat the
+                  # policy. Posting a comment is a write the policy can refuse.
+                  if ! gate_security_review "$pr" "recreate comment"; then
+                    return 0
+                  fi
                   if ! gh pr comment "$pr" --body "${RECREATE_MARKER}"$'\n@dependabot recreate'; then
                     echo "::warning::PR #${pr}: failed to post recreate comment."
                   else
@@ -217,13 +262,10 @@ jobs:
             # policy decision exactly. Without this gate we'd risk auto-
             # approving PRs that were intentionally left unapproved.
             if [ "$has_auto" = "true" ] && [ "$review" != "APPROVED" ]; then
-              # Re-check security-review state right before re-approving — a
-              # maintainer may have applied the label since the top-of-loop
-              # check, and a dismissed approval on an armed PR is exactly the
-              # case where a policy bypass would otherwise be silent.
-              srs=$(security_review_state "$pr")
-              if [ "$srs" != "false" ]; then
-                echo "::warning::PR #${pr}: security-review state is '$srs' immediately before re-approve; skipping (fail-closed)."
+              # A dismissed approval on an armed PR is exactly the case where a
+              # policy bypass would otherwise be silent — re-check the label
+              # state immediately before posting a new review.
+              if ! gate_security_review "$pr" "re-approve"; then
                 return 0
               fi
               if [ -n "${APPROVE_TOKEN:-}" ]; then
@@ -246,9 +288,7 @@ jobs:
             # deliberately left unarmed (e.g., semver-major bumps a human
             # approved for review, or any PR touching `openai/codex-action`).
             if [ "$has_auto" = "false" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$review" = "APPROVED" ]; then
-              srs=$(security_review_state "$pr")
-              if [ "$srs" != "false" ]; then
-                echo "::warning::PR #${pr}: security-review state is '$srs' immediately before arming; skipping (fail-closed)."
+              if ! gate_security_review "$pr" "arm auto-merge"; then
                 return 0
               fi
               if ! fetch_commit_message "$pr"; then
@@ -273,15 +313,33 @@ jobs:
             return 0
           }
 
+          # Two-step list so a `gh pr list` failure is surfaced rather than
+          # collapsing silently to an empty array. `mapfile < <(...)` discards
+          # the command-substitution exit status: a transient API error there
+          # would otherwise look like an empty backlog ("No open Dependabot
+          # PRs.", exit 0) and mask the underlying gh failure. Capture the JSON
+          # into a variable first; if that fails, exit non-zero so the run is
+          # visibly broken and re-fires on the next trigger.
+          #
           # `--limit 200` covers any plausible burst — Monday Dependabot batches
           # plus active feature PRs sit well under that. The default of 30
           # would silently truncate during a backlog.
-          mapfile -t prs < <(gh pr list \
-            --author "app/dependabot" --state open --limit 200 \
-            --json number --jq '.[].number')
+          #
+          # `isCrossRepository == false` matches the existing auto-merge
+          # workflow's filter on `head.repo.full_name == github.repository`.
+          # Dependabot doesn't normally open PRs from forks, but a defensive
+          # filter keeps the reconciler from acting on any future cross-repo
+          # bot PR that happened to share the `app/dependabot` author.
+          if ! prs_json=$(gh pr list \
+              --author "app/dependabot" --state open --limit 200 \
+              --json number,isCrossRepository); then
+            echo "::error::Failed to list open Dependabot PRs; aborting this tick (next scheduled run will retry)."
+            exit 1
+          fi
+          mapfile -t prs < <(jq -r '.[] | select(.isCrossRepository == false) | .number' <<<"$prs_json")
 
           if [ "${#prs[@]}" -eq 0 ]; then
-            echo "No open Dependabot PRs."
+            echo "No open in-repository Dependabot PRs."
             exit 0
           fi
 

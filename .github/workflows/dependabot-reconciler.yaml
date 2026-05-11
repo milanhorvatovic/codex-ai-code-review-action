@@ -160,6 +160,39 @@ jobs:
             return 0
           }
 
+          # Verify that `gh pr merge --auto` actually left the PR in a reconciled
+          # state. The command can exit 0 without `autoMergeRequest` being set —
+          # the exact silent enable failure this reconciler exists to catch — so
+          # checking the exit status alone would let us log "Armed auto-merge."
+          # while the PR remains stranded until the next tick, or indefinitely
+          # if the same false success repeats. Mirrors `verify_auto_merge_or_terminal`
+          # in dependabot-auto-merge.yaml. Returns 0 when the PR is genuinely
+          # MERGED/CLOSED or OPEN-with-autoMergeRequest, 1 otherwise (and emits
+          # an ::error:: annotation pointing at the most likely root causes).
+          verify_arm_or_terminal() {
+            local pr=$1 state_json pr_state has_auto
+            if ! state_json=$(gh pr view "$pr" --json state,autoMergeRequest); then
+              echo "::error::PR #${pr}: failed to verify PR state after gh pr merge --auto; cannot confirm whether auto-merge was actually enabled."
+              return 1
+            fi
+            pr_state=$(jq -r '.state' <<<"$state_json")
+            has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state_json")
+            case "$pr_state" in
+              MERGED|CLOSED)
+                echo "PR #${pr}: state is ${pr_state} after arm; reconciled."
+                return 0 ;;
+              OPEN)
+                if [ "$has_auto" = "true" ]; then
+                  return 0
+                fi
+                echo "::error::PR #${pr}: gh pr merge --auto exited cleanly but autoMergeRequest is still null on an OPEN PR — the enable failed silently (likely the github-actions bot lacks merge permission or the repository's 'Allow auto-merge' setting is disabled). Investigate immediately."
+                return 1 ;;
+              *)
+                echo "::error::PR #${pr}: unexpected PR state '${pr_state}' after auto-merge attempt; cannot confirm reconciliation."
+                return 1 ;;
+            esac
+          }
+
           # Apply the dependency policy gates from dependabot-auto-merge.yaml so
           # neither the re-approve path nor the arm-auto-merge path can act on a
           # PR a maintainer left for manual review (semver-major bumps, excluded
@@ -377,6 +410,17 @@ jobs:
               fi
               if ! gh pr merge --auto --squash "$pr"; then
                 echo "::warning::PR #${pr}: arm auto-merge failed (likely the github-actions bot lacks merge permission or the repo's 'Allow auto-merge' setting is off)."
+                return 0
+              fi
+              # `gh pr merge --auto` can exit 0 without actually enabling
+              # auto-merge — the silent-enable-failure case this workflow
+              # exists to backstop. Verify the PR state genuinely reflects the
+              # arm (or terminal MERGED/CLOSED) before trusting the success
+              # path; on verification failure, fail the run via the sticky
+              # `had_critical_error` flag so a recurring silent failure can't
+              # leave the PR stranded indefinitely.
+              if ! verify_arm_or_terminal "$pr"; then
+                had_critical_error=1
                 return 0
               fi
               # Post-arm security-review re-check. Mirrors the `arm_auto_merge`

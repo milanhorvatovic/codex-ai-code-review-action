@@ -166,14 +166,26 @@ jobs:
           # checking the exit status alone would let us log "Armed auto-merge."
           # while the PR remains stranded until the next tick, or indefinitely
           # if the same false success repeats. Mirrors `verify_auto_merge_or_terminal`
-          # in dependabot-auto-merge.yaml. Returns 0 when the PR is genuinely
-          # MERGED/CLOSED or OPEN-with-autoMergeRequest, 1 otherwise (and emits
-          # an ::error:: annotation pointing at the most likely root causes).
+          # in dependabot-auto-merge.yaml. Distinguishes two failure modes so
+          # the caller can act differently:
+          #   0 — verified-armed-or-terminal: MERGED/CLOSED, or OPEN with an
+          #       active autoMergeRequest.
+          #   1 — definitively-not-armed: OPEN with autoMergeRequest=null, or
+          #       an unexpected PR state. Auto-merge demonstrably did not take,
+          #       so the caller has nothing to disable.
+          #   2 — state-unknown: the `gh pr view` API call itself failed. We
+          #       genuinely don't know whether auto-merge armed, so the caller
+          #       must perform best-effort cleanup (a `trust-boundary` /
+          #       `security-review-required` label that landed between
+          #       gate_security_review and `gh pr merge --auto` could have
+          #       triggered the reactive disable-auto-merge job on the
+          #       `labeled` event before the arm completed — leaving nothing
+          #       else to disable auto-merge if the arm did in fact take).
           verify_arm_or_terminal() {
             local pr=$1 state_json pr_state has_auto
             if ! state_json=$(gh pr view "$pr" --json state,autoMergeRequest); then
               echo "::error::PR #${pr}: failed to verify PR state after gh pr merge --auto; cannot confirm whether auto-merge was actually enabled."
-              return 1
+              return 2
             fi
             pr_state=$(jq -r '.state' <<<"$state_json")
             has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state_json")

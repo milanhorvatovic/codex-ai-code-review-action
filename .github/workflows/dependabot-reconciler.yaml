@@ -305,7 +305,13 @@ jobs:
                 # semver-major rejection below.
                 local dep_name_count metadata_dep
                 dep_name_count=$(grep -c "dependency-name:" <<<"$commit_msg" || true)
-                metadata_dep=$(grep -m1 "dependency-name:" <<<"$commit_msg" | sed -e 's/.*dependency-name:[[:space:]]*//' -e 's/[[:space:]]*$//')
+                # `|| true` on the pipeline because a missing `dependency-name:`
+                # trailer makes `grep -m1` exit 1 and the substitution's
+                # non-zero status would abort the run under `set -euo pipefail`.
+                # The surrounding logic expects malformed metadata to fall
+                # through to the rejection branch as a per-PR no-op, not to
+                # strand the entire reconciler tick.
+                metadata_dep=$(grep -m1 "dependency-name:" <<<"$commit_msg" | sed -e 's/.*dependency-name:[[:space:]]*//' -e 's/[[:space:]]*$//' || true)
                 if [ "$dep_name_count" = "1" ] && [ "$metadata_dep" = "$self_ref" ]; then
                   echo "PR #${pr}: self-reference SHA→SHA same-version bump (${prev_ver}); treating as patch-equivalent, allowing ${stage}."
                   return 0

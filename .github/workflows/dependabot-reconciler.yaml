@@ -102,9 +102,26 @@ jobs:
     # was actually associated with a Dependabot-authored PR. For the other
     # triggers (`push: main`, `schedule`, `workflow_dispatch`) the gate is a
     # no-op so the reconciler still runs as expected.
+    #
+    # `actor.login` accepts two bot identities:
+    #   - `dependabot[bot]`: the upstream run was triggered by a Dependabot
+    #     event (opened/reopened/synchronize-from-Dependabot).
+    #   - `github-actions[bot]`: the upstream run was triggered by a
+    #     `synchronize` event that this reconciler caused via
+    #     `gh pr update-branch` (the GITHUB_TOKEN that wrote the merge commit
+    #     surfaces as `github-actions[bot]` on the resulting event). That is
+    #     the canonical reactive case the workflow_run trigger exists for —
+    #     when the upstream auto-merge then completes the merge with
+    #     GITHUB_TOKEN, the `push: main` event is suppressed and this
+    #     workflow_run is the only way to react before the hourly cron.
+    # Other actors (random users opening non-Dependabot PRs, etc.) skip; the
+    # in-script `gh pr list --app dependabot` filter is the authoritative
+    # identity gate, so allowing `github-actions[bot]` here is a cost-saving
+    # hint, not a security boundary.
     if: >-
       github.event_name != 'workflow_run' ||
-      github.event.workflow_run.actor.login == 'dependabot[bot]'
+      github.event.workflow_run.actor.login == 'dependabot[bot]' ||
+      github.event.workflow_run.actor.login == 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       # `gh pr update-branch` and `gh pr merge --auto` need write on contents

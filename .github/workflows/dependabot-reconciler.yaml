@@ -563,22 +563,25 @@ jobs:
           # plus active feature PRs sit well under that. The default of 30
           # would silently truncate during a backlog.
           #
-          # `--author "app/dependabot"` is the canonical gh CLI syntax for
-          # filtering by Dependabot's GitHub App identity and narrows the API
-          # response server-side. The jq filter below is the authoritative
-          # identity check: `.author.login == "dependabot[bot]"` matches the
-          # `github.event.pull_request.user.login == 'dependabot[bot]'` filter
-          # used by dependabot-auto-merge.yaml and dependabot-release-label.yaml,
-          # so all three workflows operate on the same set even if gh CLI ever
-          # broadens what `--author "app/dependabot"` returns (e.g., aliases).
+          # `--app "dependabot"` is the gh CLI's purpose-built filter for
+          # GitHub App authors and is semantically clearer than the equivalent
+          # `--author "app/dependabot"` (the legacy form still works on gh
+          # 2.89, but `--app` is the documented path forward — see
+          # `gh pr list --help`). The jq filter below remains the
+          # authoritative identity check: `.author.login == "dependabot[bot]"`
+          # matches the `github.event.pull_request.user.login == 'dependabot[bot]'`
+          # filter used by dependabot-auto-merge.yaml and
+          # dependabot-release-label.yaml, so all three workflows operate on
+          # the same set regardless of how gh CLI evolves the `--app` /
+          # `--author` filters.
           #
           # `isCrossRepository == false` matches the existing auto-merge
           # workflow's filter on `head.repo.full_name == github.repository`.
           # Dependabot doesn't normally open PRs from forks, but a defensive
           # filter keeps the reconciler from acting on any future cross-repo
-          # bot PR that happened to share the `app/dependabot` author.
+          # bot PR that happened to share the Dependabot app identity.
           if ! prs_json=$(gh pr list \
-              --author "app/dependabot" --state open --limit 200 \
+              --app "dependabot" --state open --limit 200 \
               --json number,author,isCrossRepository); then
             echo "::error::Failed to list open Dependabot PRs; aborting this tick (next scheduled run will retry)."
             exit 1

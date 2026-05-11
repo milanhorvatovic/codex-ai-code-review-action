@@ -92,6 +92,17 @@ concurrency:
 
 jobs:
   reconcile:
+    # `workflow_run` fires for *every* completed run of the auto-merge workflow,
+    # including runs whose jobs were skipped by their own `if:` guards (e.g., a
+    # non-Dependabot PR opens, the auto-merge workflow triggers, all its jobs
+    # short-circuit, the workflow nevertheless "completes" — and our reconciler
+    # would fire on top of that). Skip those: only run when the upstream run
+    # was actually associated with a Dependabot-authored PR. For the other
+    # triggers (`push: main`, `schedule`, `workflow_dispatch`) the gate is a
+    # no-op so the reconciler still runs as expected.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       # `gh pr update-branch` and `gh pr merge --auto` need write on contents

@@ -270,7 +270,7 @@ jobs:
           # `set -e` at the top level would otherwise kill the whole run.
           reconcile_pr() {
             local pr=$1
-            local state merge_state mergeable review has_auto srs
+            local state merge_state mergeable review has_auto srs verify_rc
 
             if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
               echo "::warning::PR #${pr}: failed to fetch PR state; skipping this iteration."
@@ -431,7 +431,35 @@ jobs:
               # path; on verification failure, fail the run via the sticky
               # `had_critical_error` flag so a recurring silent failure can't
               # leave the PR stranded indefinitely.
-              if ! verify_arm_or_terminal "$pr"; then
+              #
+              # Capture the exit code distinctly so we can branch on it:
+              #   1 — definitively-not-armed: nothing to disable.
+              #   2 — state-unknown: the post-arm verify gh API call failed,
+              #       so we can't rule out that auto-merge actually armed. If
+              #       a `trust-boundary` / `security-review-required` label
+              #       landed during the arm window, the reactive
+              #       `disable-auto-merge-on-security-review` job may have
+              #       fired on the `labeled` event before the arm completed
+              #       — meaning nothing else will disable auto-merge if the
+              #       arm did in fact take. Best-effort `--disable-auto`
+              #       closes that gap. The disable may itself return non-zero
+              #       (if auto-merge never armed there's nothing to disable);
+              #       that's acceptable in this branch.
+              if verify_arm_or_terminal "$pr"; then
+                verify_rc=0
+              else
+                verify_rc=$?
+              fi
+              if [ "$verify_rc" -ne 0 ]; then
+                if [ "$verify_rc" = "2" ]; then
+                  case "$(security_review_state "$pr")" in
+                    true|unknown)
+                      echo "::warning::PR #${pr}: post-arm verify could not confirm whether auto-merge actually armed; security-review state is non-false. Attempting best-effort --disable-auto to close the silent-arm-plus-label race."
+                      if ! gh pr merge --disable-auto "$pr"; then
+                        echo "::warning::PR #${pr}: best-effort --disable-auto returned non-zero; this is expected if auto-merge never armed."
+                      fi ;;
+                  esac
+                fi
                 had_critical_error=1
                 return 0
               fi

@@ -14,6 +14,12 @@ updates:
           - "milanhorvatovic/codex-ai-code-review-action"
         patterns:
           - "*"
+        # Keep majors out of the group so they arrive as standalone PRs the auto-
+        # merge workflow's semver-major exclusion can route to manual review
+        # without dragging unrelated patch/minor bumps along.
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "github-actions"
@@ -28,10 +34,17 @@ updates:
     directory: "/"
     package-ecosystem: "npm"
     groups:
-      dev-dependencies:
-        dependency-type: "development"
-      production-dependencies:
-        dependency-type: "production"
+      # Single group per ecosystem mirrors the github-actions shape above. The
+      # prior dev/prod split never branched anywhere downstream — `rebuild-dist`
+      # runs for every Dependabot PR regardless of dependency type, and the
+      # auto-merge / release-label / reconciler workflows operate on PR-level
+      # state, not group identity.
+      npm:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "npm"

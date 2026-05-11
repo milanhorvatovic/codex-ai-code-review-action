@@ -160,6 +160,65 @@ jobs:
             return 0
           }
 
+          # Apply the dependency policy gates from dependabot-auto-merge.yaml so
+          # neither the re-approve path nor the arm-auto-merge path can act on a
+          # PR a maintainer left for manual review (semver-major bumps, excluded
+          # `openai/codex-action`). Returns 0 when the PR is eligible, 1 when a
+          # gate refuses, 2 on commit-metadata fetch failure (fail-closed). Relies
+          # on dynamic scoping for `commit_msg` declared `local` in `reconcile_pr`.
+          check_dependency_gates() {
+            local pr=$1 stage=$2
+            if ! fetch_commit_message "$pr"; then
+              echo "::warning::PR #${pr}: failed to fetch commit metadata; skipping ${stage} (fail-closed)."
+              return 2
+            fi
+            if grep -q "update-type: version-update:semver-major" <<<"$commit_msg"; then
+              echo "PR #${pr}: contains a semver-major update; manual review required, not performing ${stage}."
+              return 1
+            fi
+            if grep -q "dependency-name: openai/codex-action" <<<"$commit_msg"; then
+              echo "PR #${pr}: contains the excluded dependency openai/codex-action; manual review required, not performing ${stage}."
+              return 1
+            fi
+            return 0
+          }
+
+          # DIRTY-path handler (real merge conflict). Posts the one-shot
+          # `@dependabot recreate` nudge, gated by the marker comment so we
+          # don't spam the PR. Extracted into a helper so callers can re-enter
+          # the same logic from multiple paths instead of duplicating the body.
+          #
+          # The marker lookup uses server-side jq with `--arg` so the literal
+          # HTML-comment characters in $RECREATE_MARKER never participate in
+          # shell or jq quoting. The full comments payload only lands in the
+          # jq stdin, not in a bash variable scanned by `grep`, so long-lived
+          # PRs with hundreds of comments don't risk hitting any shell limit.
+          handle_dirty() {
+            local pr=$1 comments_json
+            echo "DIRTY (real conflict)."
+            if ! comments_json=$(gh pr view "$pr" --json comments); then
+              echo "::warning::PR #${pr}: failed to fetch comments; skipping recreate posting (fail-closed to avoid duplicate comments)."
+              return 0
+            fi
+            if jq -e --arg marker "$RECREATE_MARKER" 'any(.comments[]; .body | contains($marker))' <<<"$comments_json" >/dev/null; then
+              echo "Recreate comment already posted; skipping."
+              return 0
+            fi
+            # Re-check the security-review state immediately before commenting —
+            # posting `@dependabot recreate` on a PR a maintainer just flagged
+            # for manual review would defeat the policy. Posting a comment is a
+            # write the policy can refuse.
+            if ! gate_security_review "$pr" "recreate comment"; then
+              return 0
+            fi
+            if ! gh pr comment "$pr" --body "${RECREATE_MARKER}"$'\n@dependabot recreate'; then
+              echo "::warning::PR #${pr}: failed to post recreate comment."
+            else
+              echo "Posted @dependabot recreate."
+            fi
+            return 0
+          }
+
           # Per-PR reconciliation. Always returns 0 — every failure path emits a
           # `::warning::` and returns early so the outer loop continues with the
           # next PR. Never let an unhandled non-zero exit escape this function;
@@ -217,38 +276,7 @@ jobs:
                 has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
                 ;;
               DIRTY)
-                # Real conflict — Dependabot's auto-rebase can't resolve it.
-                # Drop a one-shot `@dependabot recreate` so Dependabot rebuilds
-                # the PR from scratch. Marker-gated to avoid spamming the PR
-                # on every hourly tick.
-                #
-                # Fail-closed on comment-fetch failure: piping `gh pr view`
-                # straight into `grep` would treat a transient API error as
-                # "marker absent" and post a duplicate recreate request each
-                # hour. Fetch comments into a variable first; if the fetch
-                # fails, skip the comment entirely until the next run.
-                echo "DIRTY (real conflict)."
-                local comments
-                if ! comments=$(gh pr view "$pr" --json comments --jq '.comments[].body'); then
-                  echo "::warning::PR #${pr}: failed to fetch comments; skipping recreate posting (fail-closed to avoid duplicate comments)."
-                  return 0
-                fi
-                if grep -qF "$RECREATE_MARKER" <<<"$comments"; then
-                  echo "Recreate comment already posted; skipping."
-                else
-                  # Re-check the security-review state immediately before
-                  # commenting — posting `@dependabot recreate` on a PR a
-                  # maintainer just flagged for manual review would defeat the
-                  # policy. Posting a comment is a write the policy can refuse.
-                  if ! gate_security_review "$pr" "recreate comment"; then
-                    return 0
-                  fi
-                  if ! gh pr comment "$pr" --body "${RECREATE_MARKER}"$'\n@dependabot recreate'; then
-                    echo "::warning::PR #${pr}: failed to post recreate comment."
-                  else
-                    echo "Posted @dependabot recreate."
-                  fi
-                fi
+                handle_dirty "$pr"
                 return 0
                 ;;
             esac
@@ -262,10 +290,26 @@ jobs:
             # policy decision exactly. Without this gate we'd risk auto-
             # approving PRs that were intentionally left unapproved.
             if [ "$has_auto" = "true" ] && [ "$review" != "APPROVED" ]; then
+              # A non-APPROVED reviewDecision on an armed PR is not unique to a
+              # dismissed bot approval. It also matches:
+              #   - CHANGES_REQUESTED: a deliberate maintainer block — never re-approve.
+              #   - A maintainer manually enabling auto-merge for a semver-major
+              #     or excluded-dep PR (so a human can review). Posting a fresh
+              #     bot approval would let that PR auto-merge despite the policy.
+              # Skip CHANGES_REQUESTED outright, then re-run the same dependency
+              # policy gates the arm path uses so the reconciler can never re-
+              # approve a PR the auto-merge workflow itself would have refused.
+              if [ "$review" = "CHANGES_REQUESTED" ]; then
+                echo "PR #${pr}: reviewDecision=CHANGES_REQUESTED; not re-approving (deliberate maintainer block)."
+                return 0
+              fi
               # A dismissed approval on an armed PR is exactly the case where a
               # policy bypass would otherwise be silent — re-check the label
               # state immediately before posting a new review.
               if ! gate_security_review "$pr" "re-approve"; then
+                return 0
+              fi
+              if ! check_dependency_gates "$pr" "re-approve"; then
                 return 0
               fi
               if [ -n "${APPROVE_TOKEN:-}" ]; then
@@ -291,22 +335,48 @@ jobs:
               if ! gate_security_review "$pr" "arm auto-merge"; then
                 return 0
               fi
-              if ! fetch_commit_message "$pr"; then
-                echo "::warning::PR #${pr}: failed to fetch commit metadata; skipping auto-merge arm (fail-closed)."
-                return 0
-              fi
-              if grep -q "update-type: version-update:semver-major" <<<"$commit_msg"; then
-                echo "PR #${pr}: contains a semver-major update; manual review required, not arming auto-merge."
-                return 0
-              fi
-              if grep -q "dependency-name: openai/codex-action" <<<"$commit_msg"; then
-                echo "PR #${pr}: contains the excluded dependency openai/codex-action; manual review required, not arming auto-merge."
+              if ! check_dependency_gates "$pr" "arm auto-merge"; then
                 return 0
               fi
               if ! gh pr merge --auto --squash "$pr"; then
                 echo "::warning::PR #${pr}: arm auto-merge failed (likely the github-actions bot lacks merge permission or the repo's 'Allow auto-merge' setting is off)."
                 return 0
               fi
+              # Post-arm security-review re-check. Mirrors the `arm_auto_merge`
+              # helper in dependabot-auto-merge.yaml: between `gate_security_review`
+              # above and the `gh pr merge --auto` call we made several gh API
+              # calls (commit fetch, semver-major grep, exclude-list grep), giving
+              # a maintainer a multi-second window to apply `trust-boundary` or
+              # `security-review-required`. If that label landed before the arm,
+              # the reactive `disable-auto-merge-on-security-review` job in
+              # dependabot-auto-merge.yaml may have already fired on the `labeled`
+              # event before auto-merge was actually armed — meaning nothing else
+              # will disable auto-merge for us. Re-query the label state and
+              # defensively disable auto-merge on `true` or `unknown`.
+              # If the defensive `--disable-auto` itself fails, the PR remains
+              # armed for auto-merge despite the policy requiring manual review
+              # — a silent policy bypass. Mirror the `arm_auto_merge` helper in
+              # dependabot-auto-merge.yaml: that workflow `return 1`s in this
+              # situation so the job fails loudly. Per-PR isolation means we
+              # can't `exit 1` here without stranding the remaining PRs, so we
+              # set a sticky `had_critical_error` flag that the outer `for pr`
+              # loop reads to fail the run after every PR has been processed.
+              case "$(security_review_state "$pr")" in
+                true)
+                  echo "::error::PR #${pr}: security-review label landed during the arm window; reverting auto-merge."
+                  if ! gh pr merge --disable-auto "$pr"; then
+                    echo "::error::PR #${pr}: failed to disable auto-merge on a security-review PR. The PR may still merge automatically when conditions are met, bypassing the policy that requires manual maintainer review. Investigate immediately."
+                    had_critical_error=1
+                  fi
+                  return 0 ;;
+                unknown)
+                  echo "::error::PR #${pr}: failed to verify security-review label state after arming auto-merge. Defensively disabling auto-merge to avoid a possible policy bypass — the reactive disable-auto-merge job only fires on the labeled event, which may have already run before this point."
+                  if ! gh pr merge --disable-auto "$pr"; then
+                    echo "::error::PR #${pr}: failed to defensively disable auto-merge on a possibly security-review-required PR. Investigate immediately."
+                    had_critical_error=1
+                  fi
+                  return 0 ;;
+              esac
               echo "Armed auto-merge."
             fi
 
@@ -343,8 +413,23 @@ jobs:
             exit 0
           fi
 
+          # Sticky cross-PR failure flag. `reconcile_pr` always returns 0 to
+          # preserve per-PR isolation (one transient `gh` error must not strand
+          # the rest of the backlog), but a failed defensive auto-merge disable
+          # on a security-review PR is a policy bypass we cannot silently log.
+          # Each PR's handler sets `had_critical_error=1` on that specific
+          # failure; we exit 1 here so the workflow run goes red and surfaces
+          # in the maintainer's run list. Mirrors the `return 1` shape used by
+          # the canonical `arm_auto_merge` helper in dependabot-auto-merge.yaml.
+          had_critical_error=0
+
           for pr in "${prs[@]}"; do
             echo "::group::PR #${pr}"
             reconcile_pr "$pr"
             echo "::endgroup::"
           done
+
+          if [ "$had_critical_error" = "1" ]; then
+            echo "::error::At least one PR encountered a critical reconciler failure (failed defensive auto-merge disable on a security-review PR). Failing the run so the issue surfaces; see per-PR ::error:: lines above."
+            exit 1
+          fi

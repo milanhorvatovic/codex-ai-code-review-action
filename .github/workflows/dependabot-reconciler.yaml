@@ -432,6 +432,15 @@ jobs:
           # plus active feature PRs sit well under that. The default of 30
           # would silently truncate during a backlog.
           #
+          # `--author "app/dependabot"` is the canonical gh CLI syntax for
+          # filtering by Dependabot's GitHub App identity and narrows the API
+          # response server-side. The jq filter below is the authoritative
+          # identity check: `.author.login == "dependabot[bot]"` matches the
+          # `github.event.pull_request.user.login == 'dependabot[bot]'` filter
+          # used by dependabot-auto-merge.yaml and dependabot-release-label.yaml,
+          # so all three workflows operate on the same set even if gh CLI ever
+          # broadens what `--author "app/dependabot"` returns (e.g., aliases).
+          #
           # `isCrossRepository == false` matches the existing auto-merge
           # workflow's filter on `head.repo.full_name == github.repository`.
           # Dependabot doesn't normally open PRs from forks, but a defensive
@@ -439,11 +448,11 @@ jobs:
           # bot PR that happened to share the `app/dependabot` author.
           if ! prs_json=$(gh pr list \
               --author "app/dependabot" --state open --limit 200 \
-              --json number,isCrossRepository); then
+              --json number,author,isCrossRepository); then
             echo "::error::Failed to list open Dependabot PRs; aborting this tick (next scheduled run will retry)."
             exit 1
           fi
-          mapfile -t prs < <(jq -r '.[] | select(.isCrossRepository == false) | .number' <<<"$prs_json")
+          mapfile -t prs < <(jq -r '.[] | select(.author.login == "dependabot[bot]" and .isCrossRepository == false) | .number' <<<"$prs_json")
 
           if [ "${#prs[@]}" -eq 0 ]; then
             echo "No open in-repository Dependabot PRs."

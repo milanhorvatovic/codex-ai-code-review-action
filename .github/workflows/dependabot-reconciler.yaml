@@ -32,6 +32,23 @@ name: Dependabot Reconciler
 # Anything outside this set (terminally-failed required checks, missing tokens,
 # security-review labels, semver-major bumps without human approval) is left for
 # manual triage.
+#
+# Policy parity with `dependabot-auto-merge.yaml`:
+#   - Skips PRs labeled `trust-boundary` or `security-review-required` (re-checked
+#     immediately before every state-mutating action, fail-closed on query error).
+#   - Skips arming auto-merge for PRs containing a semver-major bump or the
+#     excluded dependency `openai/codex-action`. Detection reads the PR's first
+#     commit message — Dependabot's authoritative `updated-dependencies:` block.
+#     Conservative versus the existing workflow's `fetch-metadata`-based logic:
+#     a self-reference SHA→SHA same-version bump (which fetch-metadata reports as
+#     semver-major) is treated as ineligible here too. The existing PR-event
+#     workflow already armed those at open time, so the reconciler's arm path
+#     never needs to fire for them — only the BEHIND / re-approve paths do, and
+#     those don't depend on these gates.
+#
+# Failure isolation: per-PR work runs inside a function that handles transient
+# `gh` failures with explicit warnings and early returns rather than letting
+# `set -euo pipefail` abort the whole loop. One broken PR cannot strand the rest.
 
 on:
   push:
@@ -60,7 +77,12 @@ jobs:
   reconcile:
     runs-on: ubuntu-latest
     permissions:
+      # `gh pr update-branch` and `gh pr merge --auto` need write on contents
+      # and pull-requests. `gh pr comment` posts an issue comment on the PR
+      # conversation, which the GITHUB_TOKEN performs via the issues API —
+      # without `issues: write` the DIRTY recreate path 403s.
       contents: write
+      issues: write
       pull-requests: write
     steps:
       - name: Reconcile open Dependabot PRs
@@ -81,31 +103,55 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t prs < <(gh pr list \
-            --author "app/dependabot" --state open \
-            --json number --jq '.[].number')
-
-          if [ "${#prs[@]}" -eq 0 ]; then
-            echo "No open Dependabot PRs."
-            exit 0
-          fi
-
-          for pr in "${prs[@]}"; do
-            echo "::group::PR #${pr}"
-
-            state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest,labels)
-
-            # Honor the security-review policy: both `trust-boundary` and
-            # `security-review-required` keep auto-merge off for manual review.
-            # Same set the auto-merge workflow's disable-auto-merge job watches.
-            has_block_label=$(jq -r '
-              any(.labels[]; .name == "trust-boundary" or .name == "security-review-required")
-            ' <<<"$state")
-            if [ "$has_block_label" = "true" ]; then
-              echo "Security-review labeled; skipping."
-              echo "::endgroup::"
-              continue
+          # Tri-state security-review label query. Returns "true"/"false" on a
+          # successful gh response and "unknown" if the API call fails. Callers
+          # fail closed on "unknown" — same pattern as the helper in
+          # dependabot-auto-merge.yaml. Stderr is intentionally NOT redirected
+          # so the underlying gh failure lands in the workflow log.
+          security_review_state() {
+            local pr=$1 result
+            if ! result=$(gh pr view "$pr" --json labels --jq 'any(.labels[]; .name == "trust-boundary" or .name == "security-review-required")'); then
+              echo "unknown"
+              return
             fi
+            echo "$result"
+          }
+
+          # Fetches the PR's first commit message (the Dependabot-authored one
+          # carrying the `updated-dependencies:` block) into `commit_msg`.
+          # Returns 0 on success, 1 on API failure — callers fail closed.
+          fetch_commit_message() {
+            local pr=$1
+            if ! commit_msg=$(gh api "repos/$GH_REPO/pulls/$pr/commits" --jq '.[0].commit.message'); then
+              return 1
+            fi
+            return 0
+          }
+
+          # Per-PR reconciliation. Always returns 0 — every failure path emits a
+          # `::warning::` and returns early so the outer loop continues with the
+          # next PR. Never let an unhandled non-zero exit escape this function;
+          # `set -e` at the top level would otherwise kill the whole run.
+          reconcile_pr() {
+            local pr=$1
+            local state merge_state mergeable review has_auto srs commit_msg
+
+            if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
+              echo "::warning::PR #${pr}: failed to fetch PR state; skipping this iteration."
+              return 0
+            fi
+
+            # Pre-action security-review check. Fail-closed: if the label state
+            # is unknown we don't take any state-mutating action on this PR.
+            srs=$(security_review_state "$pr")
+            case "$srs" in
+              true)
+                echo "Security-review labeled; skipping."
+                return 0 ;;
+              unknown)
+                echo "::warning::PR #${pr}: security-review state unknown; skipping (fail-closed)."
+                return 0 ;;
+            esac
 
             merge_state=$(jq -r '.mergeStateStatus' <<<"$state")
             mergeable=$(jq -r '.mergeable' <<<"$state")
@@ -116,15 +162,18 @@ jobs:
               BEHIND)
                 echo "BEHIND main; calling update-branch."
                 if ! gh pr update-branch "$pr"; then
-                  echo "::warning::PR #${pr} update-branch failed (transient API error or branch protection refused the update)."
+                  echo "::warning::PR #${pr}: update-branch failed (transient API error or branch protection refused the update)."
+                  return 0
                 fi
-                # Refresh state: the merge commit may have flipped `mergeable`,
-                # dismissed `reviewDecision`, or invalidated `autoMergeRequest`.
-                # Without a refresh the re-approve/arm decisions below would
-                # operate on stale data and either no-op when they shouldn't or
-                # arm auto-merge against a head that no longer satisfies the
-                # ruleset.
-                state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest,labels)
+                # Refresh state: the merge commit may have dismissed the bot
+                # review, flipped `mergeable`, or invalidated `autoMergeRequest`.
+                # Without a refresh the downstream decisions operate on stale
+                # data and could arm auto-merge against a head that no longer
+                # satisfies the ruleset.
+                if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
+                  echo "::warning::PR #${pr}: state refresh after update-branch failed; skipping downstream actions."
+                  return 0
+                fi
                 mergeable=$(jq -r '.mergeable' <<<"$state")
                 review=$(jq -r '.reviewDecision // ""' <<<"$state")
                 has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
@@ -134,15 +183,28 @@ jobs:
                 # Drop a one-shot `@dependabot recreate` so Dependabot rebuilds
                 # the PR from scratch. Marker-gated to avoid spamming the PR
                 # on every hourly tick.
+                #
+                # Fail-closed on comment-fetch failure: piping `gh pr view`
+                # straight into `grep` would treat a transient API error as
+                # "marker absent" and post a duplicate recreate request each
+                # hour. Fetch comments into a variable first; if the fetch
+                # fails, skip the comment entirely until the next run.
                 echo "DIRTY (real conflict)."
-                if gh pr view "$pr" --json comments --jq '.comments[].body' | grep -qF "$RECREATE_MARKER"; then
+                local comments
+                if ! comments=$(gh pr view "$pr" --json comments --jq '.comments[].body'); then
+                  echo "::warning::PR #${pr}: failed to fetch comments; skipping recreate posting (fail-closed to avoid duplicate comments)."
+                  return 0
+                fi
+                if grep -qF "$RECREATE_MARKER" <<<"$comments"; then
                   echo "Recreate comment already posted; skipping."
                 else
-                  gh pr comment "$pr" --body "${RECREATE_MARKER}"$'\n@dependabot recreate'
-                  echo "Posted @dependabot recreate."
+                  if ! gh pr comment "$pr" --body "${RECREATE_MARKER}"$'\n@dependabot recreate'; then
+                    echo "::warning::PR #${pr}: failed to post recreate comment."
+                  else
+                    echo "Posted @dependabot recreate."
+                  fi
                 fi
-                echo "::endgroup::"
-                continue
+                return 0
                 ;;
             esac
 
@@ -153,35 +215,78 @@ jobs:
             # review here can only mean a push (typically our own
             # update-branch) cleared it. Restoring approval matches the prior
             # policy decision exactly. Without this gate we'd risk auto-
-            # approving PRs that were intentionally left unapproved (e.g.,
-            # semver-major bumps awaiting human review).
+            # approving PRs that were intentionally left unapproved.
             if [ "$has_auto" = "true" ] && [ "$review" != "APPROVED" ]; then
+              # Re-check security-review state right before re-approving — a
+              # maintainer may have applied the label since the top-of-loop
+              # check, and a dismissed approval on an armed PR is exactly the
+              # case where a policy bypass would otherwise be silent.
+              srs=$(security_review_state "$pr")
+              if [ "$srs" != "false" ]; then
+                echo "::warning::PR #${pr}: security-review state is '$srs' immediately before re-approve; skipping (fail-closed)."
+                return 0
+              fi
               if [ -n "${APPROVE_TOKEN:-}" ]; then
                 if GH_TOKEN="$APPROVE_TOKEN" gh pr review --approve \
                     --body "Re-approved by dependabot-reconciler after the prior approval was dismissed (typically by an automated update-branch push)." \
                     "$pr"; then
                   review="APPROVED"
+                  echo "Re-approved."
                 else
-                  echo "::warning::PR #${pr} re-approve failed (likely a revoked or insufficiently-scoped DEPENDABOT_APPROVE_TOKEN_ACTIONS, or a non-CODEOWNER identity)."
+                  echo "::warning::PR #${pr}: re-approve failed (likely a revoked or insufficiently-scoped DEPENDABOT_APPROVE_TOKEN_ACTIONS, or a non-CODEOWNER identity)."
                 fi
               else
                 echo "::warning::PR #${pr} is auto-merge-armed but reviewDecision=${review} and DEPENDABOT_APPROVE_TOKEN_ACTIONS is unset; cannot restore approval. Configure the secret or approve manually."
               fi
             fi
 
-            # Arm auto-merge if the PR is otherwise ready. Gated by APPROVED so
-            # this workflow never bypasses the existing semver-major /
-            # excluded-dep / security-label policy: those filters prevent
-            # auto-approval at open time, so an unapproved PR is left alone
-            # here for a human to approve and merge manually. If a human
-            # explicitly approves a semver-major bump, that's a deliberate
-            # decision and arming auto-merge to complete it is the right call.
+            # Arm auto-merge if the PR is otherwise ready. Apply the full set
+            # of policy gates from `dependabot-auto-merge.yaml` so this
+            # workflow can never enable auto-merge on a PR that workflow
+            # deliberately left unarmed (e.g., semver-major bumps a human
+            # approved for review, or any PR touching `openai/codex-action`).
             if [ "$has_auto" = "false" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$review" = "APPROVED" ]; then
-              echo "Arming auto-merge."
-              if ! gh pr merge --auto --squash "$pr"; then
-                echo "::warning::PR #${pr} arm auto-merge failed (likely the github-actions bot lacks merge permission or the repo's 'Allow auto-merge' setting is off)."
+              srs=$(security_review_state "$pr")
+              if [ "$srs" != "false" ]; then
+                echo "::warning::PR #${pr}: security-review state is '$srs' immediately before arming; skipping (fail-closed)."
+                return 0
               fi
+              if ! fetch_commit_message "$pr"; then
+                echo "::warning::PR #${pr}: failed to fetch commit metadata; skipping auto-merge arm (fail-closed)."
+                return 0
+              fi
+              if grep -q "update-type: version-update:semver-major" <<<"$commit_msg"; then
+                echo "PR #${pr}: contains a semver-major update; manual review required, not arming auto-merge."
+                return 0
+              fi
+              if grep -q "dependency-name: openai/codex-action" <<<"$commit_msg"; then
+                echo "PR #${pr}: contains the excluded dependency openai/codex-action; manual review required, not arming auto-merge."
+                return 0
+              fi
+              if ! gh pr merge --auto --squash "$pr"; then
+                echo "::warning::PR #${pr}: arm auto-merge failed (likely the github-actions bot lacks merge permission or the repo's 'Allow auto-merge' setting is off)."
+                return 0
+              fi
+              echo "Armed auto-merge."
             fi
 
+            return 0
+          }
+
+          # `--limit 200` covers any plausible burst — Monday Dependabot batches
+          # plus active feature PRs sit well under that. The default of 30
+          # would silently truncate during a backlog.
+          mapfile -t prs < <(gh pr list \
+            --author "app/dependabot" --state open --limit 200 \
+            --json number --jq '.[].number')
+
+          if [ "${#prs[@]}" -eq 0 ]; then
+            echo "No open Dependabot PRs."
+            exit 0
+          fi
+
+          for pr in "${prs[@]}"; do
+            echo "::group::PR #${pr}"
+            reconcile_pr "$pr"
             echo "::endgroup::"
           done

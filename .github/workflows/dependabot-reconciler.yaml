@@ -220,22 +220,58 @@ jobs:
           # neither the re-approve path nor the arm-auto-merge path can act on a
           # PR a maintainer left for manual review (semver-major bumps, excluded
           # `openai/codex-action`). Returns 0 when the PR is eligible, 1 when a
-          # gate refuses, 2 on commit-metadata fetch failure (fail-closed).
+          # gate refuses, 2 on commit-metadata or PR-title fetch failure
+          # (fail-closed).
+          #
+          # The semver-major rejection mirrors the "effective update-type"
+          # derivation in `dependabot-auto-merge.yaml` and
+          # `dependabot-release-label.yaml`: a same-version SHA→SHA bump of the
+          # dogfood self-reference (`milanhorvatovic/codex-ai-code-review-action`)
+          # is conservatively reported by Dependabot/fetch-metadata as semver-
+          # major, but the auto-merge policy treats it as patch-equivalent.
+          # Without this exemption, a self-reference PR that the auto-merge
+          # workflow correctly armed would later go BEHIND, get
+          # `gh pr update-branch`-ed by the reconciler, have its bot review
+          # dismissed (`dismiss_stale_reviews_on_push: true`), and then have
+          # the reconciler refuse to re-approve — stranding the prior policy
+          # decision indefinitely.
+          #
+          # The exemption checks the PR title — Dependabot's canonical single-
+          # dep title format is `chore: bump <name> from <prev> to <new>`, and
+          # the self-reference is always a single-dep PR because it's listed
+          # under `exclude-patterns` in `.github/dependabot.yaml` (so it never
+          # joins the github-actions group). When `<name>` is the self-
+          # reference and `<prev>` equals `<new>`, treat as eligible.
           check_dependency_gates() {
-            local pr=$1 stage=$2 commit_msg
+            local pr=$1 stage=$2 commit_msg pr_title self_ref="$GH_REPO"
             if ! commit_msg=$(fetch_commit_message "$pr"); then
               echo "::warning::PR #${pr}: failed to fetch commit metadata; skipping ${stage} (fail-closed)."
               return 2
             fi
-            if grep -q "update-type: version-update:semver-major" <<<"$commit_msg"; then
-              echo "PR #${pr}: contains a semver-major update; manual review required, not performing ${stage}."
-              return 1
-            fi
+            # Excluded-dep gate runs first — independent of effective update-type.
             if grep -q "dependency-name: openai/codex-action" <<<"$commit_msg"; then
               echo "PR #${pr}: contains the excluded dependency openai/codex-action; manual review required, not performing ${stage}."
               return 1
             fi
-            return 0
+            # Non-semver-major: eligible without further checks.
+            if ! grep -q "update-type: version-update:semver-major" <<<"$commit_msg"; then
+              return 0
+            fi
+            # Semver-major present. Check if this is the self-reference same-
+            # version exemption by parsing the PR title.
+            if ! pr_title=$(gh pr view "$pr" --json title --jq '.title'); then
+              echo "::warning::PR #${pr}: failed to fetch PR title for self-reference same-version check; failing closed and rejecting ${stage}."
+              return 2
+            fi
+            if [[ "$pr_title" =~ bump[[:space:]]+([^[:space:]]+)[[:space:]]+from[[:space:]]+([^[:space:]]+)[[:space:]]+to[[:space:]]+([^[:space:]]+) ]]; then
+              local dep_name="${BASH_REMATCH[1]}" prev_ver="${BASH_REMATCH[2]}" new_ver="${BASH_REMATCH[3]}"
+              if [ "$dep_name" = "$self_ref" ] && [ "$prev_ver" = "$new_ver" ]; then
+                echo "PR #${pr}: self-reference SHA→SHA same-version bump (${prev_ver}); treating as patch-equivalent, allowing ${stage}."
+                return 0
+              fi
+            fi
+            echo "PR #${pr}: contains a semver-major update; manual review required, not performing ${stage}."
+            return 1
           }
 
           # DIRTY-path handler (real merge conflict). Posts the one-shot

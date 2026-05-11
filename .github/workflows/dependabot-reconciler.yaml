@@ -331,9 +331,12 @@ jobs:
           #
           # The marker lookup uses server-side jq with `--arg` so the literal
           # HTML-comment characters in $RECREATE_MARKER never participate in
-          # shell or jq quoting. The full comments payload only lands in the
-          # jq stdin, not in a bash variable scanned by `grep`, so long-lived
-          # PRs with hundreds of comments don't risk hitting any shell limit.
+          # shell or jq quoting. The comments payload is captured into a bash
+          # variable so the gh fetch failure can be detected separately from a
+          # successful empty-match result; the variable is then fed to jq's
+          # stdin (rather than walked with `grep`), so the marker test uses
+          # jq's JSON-aware string semantics on the parsed structure instead
+          # of relying on `grep -qF` over a flattened string.
           handle_dirty() {
             local pr=$1 comments_json
             echo "DIRTY (real conflict)."

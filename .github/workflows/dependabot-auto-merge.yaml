@@ -67,10 +67,11 @@ jobs:
 
       # Mint a short-lived token from the `oss-automation-bot` GitHub App.
       # Used to authenticate the rebuild-dist push and to attribute the
-      # commit to the App's bot user. Replaces the legacy stack of three
-      # Dependabot-scoped configuration items (`DEPENDABOT_REBUILD_TOKEN`,
-      # `DEPENDABOT_GPG_PRIVATE_KEY`, `DEPENDABOT_GIT_COMMITTER_NAME`,
-      # `DEPENDABOT_GIT_COMMITTER_EMAIL`) and the GPG import step. The
+      # commit to the App's bot user. Replaces the legacy stack of four
+      # configuration items split across two stores — two Dependabot
+      # secrets (`DEPENDABOT_REBUILD_TOKEN`, `DEPENDABOT_GPG_PRIVATE_KEY`)
+      # and two Actions variables (`DEPENDABOT_GIT_COMMITTER_NAME`,
+      # `DEPENDABOT_GIT_COMMITTER_EMAIL`) — plus the GPG import step. The
       # GPG dance was historically justified as "required to satisfy
       # main's required_signatures rule" but the repository's branch
       # ruleset (verified against the live `Default branch` ruleset) does

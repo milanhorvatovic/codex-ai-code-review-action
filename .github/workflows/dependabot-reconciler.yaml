@@ -12,10 +12,17 @@ name: Dependabot Reconciler
 #      doesn't re-fire on base movement.
 #   2. Dismissed approvals after our own `update-branch` push. The branch ruleset
 #      sets `dismiss_stale_reviews_on_push: true`, and the synchronize triggered
-#      by `gh pr update-branch` runs in Actions-secrets context (actor is
-#      `github-actions[bot]`, not `dependabot[bot]`) — so the auto-merge workflow's
-#      `DEPENDABOT_APPROVE_TOKEN` (a Dependabot secret) is empty there and the
-#      re-approve no-ops. This workflow holds the Actions-context mirror.
+#      by `gh pr update-branch` is attributed to the actor whose token authored
+#      the merge commit — `oss-automation-bot[bot]` for the App-minted token
+#      this workflow now uses (and `github-actions[bot]` for the legacy
+#      GITHUB_TOKEN fallback that no longer exists in this workflow). Neither
+#      identity is `dependabot[bot]`, so the resulting workflow run executes
+#      in Actions-secrets context — the auto-merge workflow's
+#      `DEPENDABOT_APPROVE_TOKEN` (a Dependabot secret) is unreadable there
+#      and its re-approve step no-ops. This workflow holds the codeowner-
+#      approver PAT in the Actions secret store (`secrets.CODEOWNER_APPROVER_TOKEN`)
+#      so the re-approval can restore the dismissed bot review from the
+#      Actions-side context.
 #   3. Auto-merge enable that silently failed (the case `verify_auto_merge_or_terminal`
 #      in dependabot-auto-merge.yaml exists to surface) and any dropped event from
 #      transient GitHub API errors.
@@ -32,13 +39,19 @@ name: Dependabot Reconciler
 #   - `schedule` is the backstop that catches dropped events and transient failures.
 #   - `workflow_dispatch` is the manual escape hatch.
 #
-# Conservative by design: this workflow never merges directly. It nudges PRs into
-# states the existing infrastructure can complete — updates BEHIND branches, posts
-# one `@dependabot recreate` comment on real conflicts, restores dismissed
-# approvals on already-armed PRs, and arms auto-merge on approved+mergeable PRs.
-# Anything outside this set (terminally-failed required checks, missing tokens,
-# security-review labels, semver-major bumps without human approval) is left for
-# manual triage.
+# Conservative by design: this workflow never invokes a synchronous merge
+# directly. It nudges PRs into states the existing infrastructure can complete —
+# updates BEHIND branches, posts one `@dependabot recreate` comment on real
+# conflicts, restores dismissed approvals on already-armed PRs, and ENABLES
+# auto-merge on approved+mergeable PRs via `gh pr merge --auto --squash`. That
+# last call IS the same one GitHub uses to merge synchronously when every
+# required protection on the PR is already satisfied at the moment of the
+# call (the common path for an APPROVED + MERGEABLE PR), so "enable auto-
+# merge" can complete an immediate merge in practice. The same pattern
+# governs `dependabot-auto-merge.yaml`'s `arm_auto_merge` helper. Anything
+# outside this set (terminally-failed required checks, missing tokens,
+# security-review labels, semver-major bumps without human approval) is left
+# for manual triage.
 #
 # Policy parity with `dependabot-auto-merge.yaml`:
 #   - Skips PRs labeled `trust-boundary` or `security-review-required` (re-checked

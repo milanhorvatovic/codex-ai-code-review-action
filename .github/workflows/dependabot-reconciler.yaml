@@ -149,11 +149,12 @@ jobs:
     # `event_name != 'workflow_run'` clause.
     #
     # In-script defense in depth: the `gh pr list --app dependabot` +
-    # `.author.login == "dependabot[bot]"` + `.isCrossRepository == false`
-    # filter further below remains the authoritative identity gate. A
-    # maintainer-created in-repo branch coincidentally named `dependabot/...`
-    # would pass this `if:` but exit 0 at the in-script filter because no
-    # Dependabot-authored PRs exist on it.
+    # `.author.login` matched against both `dependabot[bot]` and
+    # `app/dependabot` + `.isCrossRepository == false` filter further below
+    # remains the authoritative identity gate. A maintainer-created in-repo
+    # branch coincidentally named `dependabot/...` would pass this `if:` but
+    # exit 0 at the in-script filter because no Dependabot-authored PRs exist
+    # on it.
     if: >-
       github.event_name != 'workflow_run' ||
       (
@@ -821,13 +822,19 @@ jobs:
           # GitHub App authors and is semantically clearer than the equivalent
           # `--author "app/dependabot"` (the legacy form still works on gh
           # 2.89, but `--app` is the documented path forward — see
-          # `gh pr list --help`). The jq filter below remains the
-          # authoritative identity check: `.author.login == "dependabot[bot]"`
-          # matches the `github.event.pull_request.user.login == 'dependabot[bot]'`
-          # filter used by dependabot-auto-merge.yaml and
-          # dependabot-release-label.yaml, so all three workflows operate on
-          # the same set regardless of how gh CLI evolves the `--app` /
-          # `--author` filters.
+          # `gh pr list --help`). The jq filter below is defense in depth on
+          # top of that server-side filter.
+          #
+          # Accept both `app/dependabot` (the form gh CLI emits in
+          # `--json author` output today) and `dependabot[bot]` (the form
+          # GitHub Actions event payloads use in
+          # `github.event.pull_request.user.login`, which the auto-merge and
+          # release-label workflows match against). The two forms are
+          # equivalent identities; matching both keeps the reconciler
+          # functional regardless of which shape gh CLI returns in any future
+          # version. The earlier `dependabot[bot]`-only filter silently
+          # excluded every PR because gh CLI emits `app/dependabot` here,
+          # turning the reconciler into a no-op for BEHIND auto-merge PRs.
           #
           # `isCrossRepository == false` matches the existing auto-merge
           # workflow's filter on `head.repo.full_name == github.repository`.
@@ -840,7 +847,7 @@ jobs:
             echo "::error::Failed to list open Dependabot PRs; aborting this tick (next scheduled run will retry)."
             exit 1
           fi
-          mapfile -t prs < <(jq -r '.[] | select(.author.login == "dependabot[bot]" and .isCrossRepository == false) | .number' <<<"$prs_json")
+          mapfile -t prs < <(jq -r '.[] | select((.author.login == "dependabot[bot]" or .author.login == "app/dependabot") and .isCrossRepository == false) | .number' <<<"$prs_json")
 
           if [ "${#prs[@]}" -eq 0 ]; then
             echo "No open in-repository Dependabot PRs."

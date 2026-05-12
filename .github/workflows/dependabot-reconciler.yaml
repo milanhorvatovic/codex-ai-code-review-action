@@ -142,6 +142,19 @@ jobs:
           # read Dependabot secrets. If unset, re-approve degrades to a warning
           # and the PR waits for manual approval.
           APPROVE_TOKEN: ${{ secrets.DEPENDABOT_APPROVE_TOKEN_ACTIONS }}
+          # PAT (or GitHub App token) used for `gh pr update-branch`. With
+          # `GITHUB_TOKEN`, the resulting `synchronize` event is suppressed by
+          # GitHub's anti-loop rule — downstream required-check workflows never
+          # fire on the new merge commit, and under
+          # `strict_required_status_checks_policy: true` the PR stays blocked
+          # by stale checks that will never refresh. Using a PAT (whose
+          # `synchronize` event IS forwarded to workflows) closes that gap.
+          # If unset, the call falls back to GITHUB_TOKEN with a per-PR
+          # warning so the failure mode is visible. Configure a fine-grained
+          # PAT scoped to this repo (Contents: write, Pull requests: write)
+          # and store it as DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS under
+          # Settings → Secrets and variables → Actions.
+          UPDATE_BRANCH_TOKEN: ${{ secrets.DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS }}
           # Marker comment so the `@dependabot recreate` nudge is posted at most
           # once per PR. Dependabot doesn't acknowledge the comment in a
           # machine-readable way, so we gate on our own marker rather than
@@ -401,7 +414,23 @@ jobs:
                 return 0
               fi
               echo "BEHIND main; calling update-branch."
-              if ! gh pr update-branch "$pr"; then
+              # Use the PAT (UPDATE_BRANCH_TOKEN) when configured so the
+              # resulting `synchronize` event reaches downstream workflows.
+              # With GITHUB_TOKEN the event would be suppressed by GitHub's
+              # anti-loop rule, leaving the PR with stale required checks
+              # that never refresh under
+              # `strict_required_status_checks_policy: true`. Fall back to
+              # GITHUB_TOKEN with a per-PR warning when the PAT is unset, so
+              # the gap is visible in the run log instead of silently
+              # stranding the PR.
+              local update_branch_token
+              if [ -n "${UPDATE_BRANCH_TOKEN:-}" ]; then
+                update_branch_token="$UPDATE_BRANCH_TOKEN"
+              else
+                echo "::warning::PR #${pr}: DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS is unset; using GITHUB_TOKEN for gh pr update-branch. The resulting synchronize event is suppressed by GitHub's anti-loop rule, so downstream required-check workflows will not run on the new merge commit and the PR may remain blocked by stale checks. Configure the secret to close this gap."
+                update_branch_token="$GH_TOKEN"
+              fi
+              if ! GH_TOKEN="$update_branch_token" gh pr update-branch "$pr"; then
                 echo "::warning::PR #${pr}: update-branch failed (transient API error or branch protection refused the update)."
                 return 0
               fi

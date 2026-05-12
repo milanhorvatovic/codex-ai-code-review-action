@@ -211,8 +211,7 @@ jobs:
       # narrower blast radius than the Release Bot (the two-App split
       # exists so a leak of the lower-risk identity doesn't force rotation
       # of the higher-risk one). The `dependabot-auto-merge.yaml`
-      # rebuild-dist step is planned to migrate to this same Automation
-      # Bot identity in a follow-up.
+      # rebuild-dist step uses the same Automation Bot identity.
       - name: Mint oss-automation-bot token for update-branch
         id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1

@@ -67,12 +67,10 @@ jobs:
 
       # Mint a short-lived token from the `oss-automation-bot` GitHub App.
       # Used to authenticate the GraphQL `createCommitOnBranch` mutation
-      # that lands the rebuilt dist/ on the PR branch. Replaces the legacy
-      # stack of four configuration items split across two stores — two
-      # Dependabot secrets (`DEPENDABOT_REBUILD_TOKEN`,
-      # `DEPENDABOT_GPG_PRIVATE_KEY`) and two Actions variables
-      # (`DEPENDABOT_GIT_COMMITTER_NAME`, `DEPENDABOT_GIT_COMMITTER_EMAIL`)
-      # — plus the GPG import step.
+      # that lands the rebuilt dist/ on the PR branch. Replaces a prior
+      # multi-secret + GPG-import flow that required maintaining a PAT, a
+      # GPG key, and committer-identity variables across both the Actions
+      # and Dependabot secret stores.
       #
       # Why GraphQL rather than plain `git push`: pushes from an
       # App-installation token over HTTPS authenticate the push but do

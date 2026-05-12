@@ -656,12 +656,26 @@ jobs:
 
           # Sticky cross-PR failure flag. `reconcile_pr` always returns 0 to
           # preserve per-PR isolation (one transient `gh` error must not strand
-          # the rest of the backlog), but a failed defensive auto-merge disable
-          # on a security-review PR is a policy bypass we cannot silently log.
-          # Each PR's handler sets `had_critical_error=1` on that specific
-          # failure; we exit 1 here so the workflow run goes red and surfaces
-          # in the maintainer's run list. Mirrors the `return 1` shape used by
-          # the canonical `arm_auto_merge` helper in dependabot-auto-merge.yaml.
+          # the rest of the backlog), but a handful of per-PR conditions are
+          # too severe to silently log — surfacing them as a red workflow run
+          # is the maintainer's only signal that the reconciler is no longer
+          # doing its job. Each PR's handler sets `had_critical_error=1` on
+          # any of these conditions:
+          #
+          #   1. `gh pr merge --auto --squash` itself returned non-zero. The
+          #      message text suggests bot-permission or repo-setting issues —
+          #      persistent classes that strand every eligible Dependabot PR.
+          #   2. `verify_arm_or_terminal` returned `1` (definitively-not-armed:
+          #      gh exited cleanly but the PR is OPEN with `autoMergeRequest`
+          #      still null) or `2` (state-unknown: post-arm `gh pr view` API
+          #      call itself failed and we can't confirm whether arm took).
+          #   3. A failed defensive `gh pr merge --disable-auto` after a
+          #      security-review label landed during the arm window — the
+          #      original policy-bypass case the flag was introduced for.
+          #
+          # The loop-end check exits 1 so the run goes red. Mirrors the
+          # `return 1` shape used by the canonical `arm_auto_merge` helper in
+          # `dependabot-auto-merge.yaml`.
           had_critical_error=0
 
           for pr in "${prs[@]}"; do
@@ -671,6 +685,6 @@ jobs:
           done
 
           if [ "$had_critical_error" = "1" ]; then
-            echo "::error::At least one PR encountered a critical reconciler failure (failed defensive auto-merge disable on a security-review PR). Failing the run so the issue surfaces; see per-PR ::error:: lines above."
+            echo "::error::At least one PR encountered a critical reconciler failure (arm-call failure, silent or unverifiable auto-merge enable, or failed defensive disable on a security-review PR). Failing the run so the issue surfaces; see per-PR ::error:: lines above for the specific cause."
             exit 1
           fi

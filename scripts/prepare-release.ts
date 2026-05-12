@@ -1028,7 +1028,7 @@ export function runCli(deps: PrepareReleaseDeps = {}): number {
 
     const branch = `release/v${targetVersion}`;
     const botUserId = env.RELEASE_APP_BOT_USER_ID;
-    const botLogin = "codex-review-action-release-bot[bot]";
+    const botLogin = "oss-release-bot[bot]";
     if (!botUserId) {
       throw new Error(
         "RELEASE_APP_BOT_USER_ID env var is required (the bot user ID is needed to author commits with the canonical noreply email and to verify the release branch contains only bot commits).",

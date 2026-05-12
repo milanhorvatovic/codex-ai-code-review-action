@@ -83,7 +83,7 @@ jobs:
       # committer-identity configuration to manage.
       #
       # `create-github-app-token` fails the job if
-      # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
+      # `vars.AUTOMATION_CLIENT_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
       # missing, which subsumes the prior `Validate rebuild-dist
       # configuration` step's role. The private key must exist in BOTH
       # the Actions and Dependabot secrets stores — Dependabot-triggered
@@ -102,7 +102,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
-          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          client-id: ${{ vars.AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
           permission-contents: write
 

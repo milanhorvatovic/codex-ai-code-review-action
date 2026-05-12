@@ -205,7 +205,7 @@ jobs:
       # `strict_required_status_checks_policy: true`.
       #
       # `release.yaml` uses the same `actions/create-github-app-token`
-      # minting shape against a different App (`codex-review-action-release-bot`,
+      # minting shape against a different App (`oss-release-bot`,
       # the Release Bot) — the cross-reference is to the pattern, not the
       # identity. This workflow consumes the Automation Bot, which has a
       # narrower blast radius than the Release Bot (the two-App split
@@ -216,7 +216,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
-          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          client-id: ${{ vars.AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
 
       - name: Reconcile open Dependabot PRs
@@ -235,7 +235,7 @@ jobs:
           APPROVE_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
           # App-minted token from the `oss-automation-bot` step above. The
           # `create-github-app-token` action fails the job if
-          # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
+          # `vars.AUTOMATION_CLIENT_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
           # missing, so by the time this step runs the token is always
           # present — no fallback path needed.
           UPDATE_BRANCH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -537,7 +537,7 @@ jobs:
               # `UPDATE_BRANCH_TOKEN` is the `oss-automation-bot` App-minted
               # token from the workflow-level `app-token` step. The
               # `create-github-app-token` action fails the job upstream if
-              # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY`
+              # `vars.AUTOMATION_CLIENT_ID` or `secrets.AUTOMATION_PRIVATE_KEY`
               # is missing, so the token is guaranteed present here — no
               # fallback path needed. Using the App identity instead of
               # `GITHUB_TOKEN` ensures the resulting `synchronize` event is

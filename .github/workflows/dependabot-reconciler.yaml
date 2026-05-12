@@ -270,6 +270,18 @@ jobs:
               echo "::warning::PR #${pr}: failed to fetch commit metadata; skipping ${stage} (fail-closed)."
               return 2
             fi
+            # Require the Dependabot metadata trailers to exist before we
+            # can classify the PR. Absent `update-type:` lines means we are
+            # looking at a non-Dependabot-authored commit (a maintainer
+            # amended/rebased, the commit message was scrubbed, or Dependabot
+            # changed its format) — without the trailer we cannot
+            # distinguish patch from semver-major, and silently returning 0
+            # would let a semver-major bump through the gate. Fail closed:
+            # reject the stage and warn so the maintainer can investigate.
+            if ! grep -q "update-type: " <<<"$commit_msg"; then
+              echo "::warning::PR #${pr}: commit message does not contain a Dependabot 'update-type:' trailer; cannot classify effective update-type, failing closed and not performing ${stage}."
+              return 1
+            fi
             # Excluded-dep gate runs first — independent of effective update-type.
             if grep -q "dependency-name: openai/codex-action" <<<"$commit_msg"; then
               echo "PR #${pr}: contains the excluded dependency openai/codex-action; manual review required, not performing ${stage}."

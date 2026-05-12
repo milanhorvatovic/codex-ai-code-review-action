@@ -14,9 +14,20 @@ updates:
           - "milanhorvatovic/codex-ai-code-review-action"
         patterns:
           - "*"
+        # Keep majors out of the group so they arrive as standalone PRs the auto-
+        # merge workflow's semver-major exclusion can route to manual review
+        # without dragging unrelated patch/minor bumps along.
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "github-actions"
+      # `release: patch` is the fast-path default for grouped patch/minor
+      # bumps; for standalone semver-major PRs (which split out of the group
+      # because of `update-types: [minor, patch]` above), the
+      # `dependabot-release-label.yaml` workflow replaces it with
+      # `release: major` based on the effective update-type.
       - "release: patch"
     schedule:
       day: "monday"
@@ -28,13 +39,25 @@ updates:
     directory: "/"
     package-ecosystem: "npm"
     groups:
-      dev-dependencies:
-        dependency-type: "development"
-      production-dependencies:
-        dependency-type: "production"
+      # Single group per ecosystem mirrors the github-actions shape above. The
+      # prior dev/prod split never branched anywhere downstream — `rebuild-dist`
+      # runs for every Dependabot PR regardless of dependency type, and the
+      # auto-merge / release-label / reconciler workflows operate on PR-level
+      # state, not group identity.
+      npm:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "npm"
+      # `release: patch` is the fast-path default for grouped patch/minor
+      # bumps; for standalone semver-major PRs (which split out of the group
+      # because of `update-types: [minor, patch]` above), the
+      # `dependabot-release-label.yaml` workflow replaces it with
+      # `release: major` based on the effective update-type.
       - "release: patch"
     schedule:
       day: "monday"

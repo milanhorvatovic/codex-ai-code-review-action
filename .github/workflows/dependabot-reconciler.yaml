@@ -163,29 +163,46 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      # Mint a short-lived token from the `oss-automation-bot` GitHub App.
+      # Used for `gh pr update-branch` so the resulting `synchronize` event is
+      # attributed to the App identity rather than to `GITHUB_TOKEN` —
+      # GitHub's anti-loop rule suppresses GITHUB_TOKEN-attributed
+      # synchronize events, which would otherwise prevent downstream
+      # required-check workflows from running on the new merge commit and
+      # leave the PR blocked by stale checks under
+      # `strict_required_status_checks_policy: true`.
+      # Same App identity used by the Release App pattern in `release.yaml`
+      # (cross-reference for the App-token minting shape). The
+      # `dependabot-auto-merge.yaml` rebuild-dist step migration to this
+      # same App is pending — see oss-automation/repos/codex-ai-code-review-action.md.
+      - name: Mint oss-automation-bot token for update-branch
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # @v3 as 3.1.1
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
+
       - name: Reconcile open Dependabot PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           # Actions-context mirror of the Dependabot secret used by
-          # dependabot-auto-merge.yaml. Same PAT, separate secret entry —
-          # workflows triggered by `push`/`schedule`/`workflow_dispatch` cannot
-          # read Dependabot secrets. If unset, re-approve degrades to a warning
-          # and the PR waits for manual approval.
-          APPROVE_TOKEN: ${{ secrets.DEPENDABOT_APPROVE_TOKEN_ACTIONS }}
-          # PAT (or GitHub App token) used for `gh pr update-branch`. With
-          # `GITHUB_TOKEN`, the resulting `synchronize` event is suppressed by
-          # GitHub's anti-loop rule — downstream required-check workflows never
-          # fire on the new merge commit, and under
-          # `strict_required_status_checks_policy: true` the PR stays blocked
-          # by stale checks that will never refresh. Using a PAT (whose
-          # `synchronize` event IS forwarded to workflows) closes that gap.
-          # If unset, the call falls back to GITHUB_TOKEN with a per-PR
-          # warning so the failure mode is visible. Configure a fine-grained
-          # PAT scoped to this repo (Contents: write, Pull requests: write)
-          # and store it as DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS under
-          # Settings → Secrets and variables → Actions.
-          UPDATE_BRANCH_TOKEN: ${{ secrets.DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS }}
+          # dependabot-auto-merge.yaml's auto-approval step. Same PAT,
+          # separate secret entry — workflows triggered by
+          # `push`/`schedule`/`workflow_run`/`workflow_dispatch` cannot read
+          # Dependabot secrets, so a dedicated Actions-context mirror is
+          # required. If unset, re-approve degrades to a warning and the PR
+          # waits for manual approval. Per oss-automation/conventions.md,
+          # this PAT identity is referred to as the codeowner-approver
+          # token; the Dependabot-context counterpart will rename to
+          # `CODEOWNER_APPROVER_TOKEN` at the next rotation.
+          APPROVE_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN_ACTIONS }}
+          # App-minted token from the `oss-automation-bot` step above. The
+          # `create-github-app-token` action fails the job if
+          # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
+          # missing, so by the time this step runs the token is always
+          # present — no fallback path needed.
+          UPDATE_BRANCH_TOKEN: ${{ steps.app-token.outputs.token }}
           # Marker comment so the `@dependabot recreate` nudge is posted at most
           # once per PR. Dependabot doesn't acknowledge the comment in a
           # machine-readable way, so we gate on our own marker rather than
@@ -457,23 +474,18 @@ jobs:
                 return 0
               fi
               echo "BEHIND main; calling update-branch."
-              # Use the PAT (UPDATE_BRANCH_TOKEN) when configured so the
-              # resulting `synchronize` event reaches downstream workflows.
-              # With GITHUB_TOKEN the event would be suppressed by GitHub's
-              # anti-loop rule, leaving the PR with stale required checks
-              # that never refresh under
-              # `strict_required_status_checks_policy: true`. Fall back to
-              # GITHUB_TOKEN with a per-PR warning when the PAT is unset, so
-              # the gap is visible in the run log instead of silently
-              # stranding the PR.
-              local update_branch_token
-              if [ -n "${UPDATE_BRANCH_TOKEN:-}" ]; then
-                update_branch_token="$UPDATE_BRANCH_TOKEN"
-              else
-                echo "::warning::PR #${pr}: DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS is unset; using GITHUB_TOKEN for gh pr update-branch. The resulting synchronize event is suppressed by GitHub's anti-loop rule, so downstream required-check workflows will not run on the new merge commit and the PR may remain blocked by stale checks. Configure the secret to close this gap."
-                update_branch_token="$GH_TOKEN"
-              fi
-              if ! GH_TOKEN="$update_branch_token" gh pr update-branch "$pr"; then
+              # `UPDATE_BRANCH_TOKEN` is the `oss-automation-bot` App-minted
+              # token from the workflow-level `app-token` step. The
+              # `create-github-app-token` action fails the job upstream if
+              # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY`
+              # is missing, so the token is guaranteed present here — no
+              # fallback path needed. Using the App identity instead of
+              # `GITHUB_TOKEN` ensures the resulting `synchronize` event is
+              # forwarded to downstream required-check workflows
+              # (GITHUB_TOKEN's would be suppressed by GitHub's anti-loop
+              # rule and the PR would stay blocked by stale checks under
+              # `strict_required_status_checks_policy: true`).
+              if ! GH_TOKEN="$UPDATE_BRANCH_TOKEN" gh pr update-branch "$pr"; then
                 echo "::warning::PR #${pr}: update-branch failed (transient API error or branch protection refused the update)."
                 return 0
               fi
@@ -586,13 +598,13 @@ jobs:
                     review="APPROVED"
                     echo "Re-approved."
                   else
-                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision is '${post_approve_decision}' (need APPROVED). The DEPENDABOT_APPROVE_TOKEN_ACTIONS identity likely does not satisfy the branch ruleset's CODEOWNER requirement; auto-merge will remain blocked. Configure a token belonging to a code-owner."
+                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision is '${post_approve_decision}' (need APPROVED). The CODEOWNER_APPROVER_TOKEN_ACTIONS identity likely does not satisfy the branch ruleset's CODEOWNER requirement; auto-merge will remain blocked. Configure a token belonging to a code-owner."
                   fi
                 else
-                  echo "::warning::PR #${pr}: re-approve failed (likely a revoked or insufficiently-scoped DEPENDABOT_APPROVE_TOKEN_ACTIONS, or a non-CODEOWNER identity)."
+                  echo "::warning::PR #${pr}: re-approve failed (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN_ACTIONS, or a non-CODEOWNER identity)."
                 fi
               else
-                echo "::warning::PR #${pr} is auto-merge-armed but reviewDecision=${review} and DEPENDABOT_APPROVE_TOKEN_ACTIONS is unset; cannot restore approval. Configure the secret or approve manually."
+                echo "::warning::PR #${pr} is auto-merge-armed but reviewDecision=${review} and CODEOWNER_APPROVER_TOKEN_ACTIONS is unset; cannot restore approval. Configure the secret or approve manually."
               fi
             fi
 

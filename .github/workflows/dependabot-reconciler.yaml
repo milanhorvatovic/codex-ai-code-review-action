@@ -416,7 +416,16 @@ jobs:
               echo "::warning::PR #${pr}: failed to fetch comments; skipping recreate posting (fail-closed to avoid duplicate comments)."
               return 0
             fi
-            if jq -e --arg marker "$RECREATE_MARKER" 'any(.comments[]; .body | contains($marker))' <<<"$comments_json" >/dev/null; then
+            # Marker-match restricted to comments authored by
+            # `github-actions[bot]` — the identity this workflow posts under
+            # (via the default `GH_TOKEN`/`secrets.GITHUB_TOKEN`). Without
+            # the author filter, an arbitrary commenter on a public PR could
+            # pre-seed the HTML marker into a comment body and suppress this
+            # workflow's only recreate-nudge for a real DIRTY Dependabot PR,
+            # leaving the PR stuck. Note: if the comment-posting identity is
+            # ever migrated to a different bot (e.g., `oss-automation-bot`),
+            # update the author check here in lockstep.
+            if jq -e --arg marker "$RECREATE_MARKER" 'any(.comments[]; .author.login == "github-actions[bot]" and (.body | contains($marker)))' <<<"$comments_json" >/dev/null; then
               echo "Recreate comment already posted; skipping."
               return 0
             fi

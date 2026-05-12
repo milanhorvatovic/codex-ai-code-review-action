@@ -172,26 +172,46 @@ jobs:
     # normal runs.
     timeout-minutes: 30
     permissions:
-      # `gh pr update-branch` and `gh pr merge --auto` need write on contents
-      # and pull-requests. `gh pr comment` posts an issue comment on the PR
-      # conversation, which the GITHUB_TOKEN performs via the issues API —
-      # without `issues: write` the DIRTY recreate path 403s.
+      # Scopes granted to the workflow's default GITHUB_TOKEN. `gh pr
+      # update-branch` is NOT on this list — it runs with the
+      # `oss-automation-bot` App-minted token (see the `app-token` step
+      # below), which carries its own permission set independent of these
+      # scopes.
+      #
+      # GITHUB_TOKEN consumers in this workflow:
+      #   - `gh pr merge --auto --squash` needs `contents: write` (squash
+      #     merge mutates main's head) and `pull-requests: write` (mutates
+      #     PR state).
+      #   - `gh pr merge --disable-auto` needs `pull-requests: write` only.
+      #   - `gh pr comment` (the `@dependabot recreate` nudge) needs
+      #     `issues: write` because PR conversation comments are issue
+      #     comments in GitHub's permission model — without it the DIRTY
+      #     recreate path 403s.
+      # The codeowner-approver re-approval (`gh pr review --approve`) runs
+      # with `APPROVE_TOKEN` (a PAT), not GITHUB_TOKEN, so it doesn't
+      # require a scope here.
       contents: write
       issues: write
       pull-requests: write
     steps:
       # Mint a short-lived token from the `oss-automation-bot` GitHub App.
-      # Used for `gh pr update-branch` so the resulting `synchronize` event is
-      # attributed to the App identity rather than to `GITHUB_TOKEN` —
+      # Used for `gh pr update-branch` so the resulting `synchronize` event
+      # is attributed to the App identity rather than to `GITHUB_TOKEN` —
       # GitHub's anti-loop rule suppresses GITHUB_TOKEN-attributed
       # synchronize events, which would otherwise prevent downstream
       # required-check workflows from running on the new merge commit and
       # leave the PR blocked by stale checks under
       # `strict_required_status_checks_policy: true`.
-      # Same App identity used by the Release App pattern in `release.yaml`
-      # (cross-reference for the App-token minting shape). The
-      # `dependabot-auto-merge.yaml` rebuild-dist step migration to this
-      # same App is pending — see oss-automation/repos/codex-ai-code-review-action.md.
+      #
+      # `release.yaml` uses the same `actions/create-github-app-token`
+      # minting shape against a DIFFERENT App (`codex-review-action-release-bot`,
+      # the Release Bot) — the cross-reference is to the pattern, not to
+      # the identity; this workflow consumes the Automation Bot per the
+      # two-App split documented in
+      # oss-automation/decisions/001-two-apps-release-and-automation.md.
+      # The `dependabot-auto-merge.yaml` rebuild-dist step migration to
+      # this same `oss-automation-bot` App identity is pending — see
+      # oss-automation/repos/codex-ai-code-review-action.md.
       - name: Mint oss-automation-bot token for update-branch
         id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1

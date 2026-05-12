@@ -1,0 +1,885 @@
+name: Dependabot Reconciler
+
+# State-reconciler for open Dependabot PRs. Drives each PR toward "merged or
+# definitively stuck" from whatever state it's currently in, complementing
+# `dependabot-auto-merge.yaml` (which only sees `pull_request` events) with the
+# things that workflow can't observe:
+#
+#   1. Base branch advancing under `strict_required_status_checks_policy: true`.
+#      When one Dependabot PR in a Monday batch merges, every other open Dependabot
+#      PR transitions to `BEHIND` and stalls — GitHub auto-merge does NOT
+#      auto-rebase the head in strict-checks mode, and the `pull_request` workflow
+#      doesn't re-fire on base movement.
+#   2. Dismissed approvals after our own `update-branch` push. The branch ruleset
+#      sets `dismiss_stale_reviews_on_push: true`, and the synchronize triggered
+#      by `gh pr update-branch` is attributed to the actor whose token authored
+#      the merge commit — `oss-automation-bot[bot]` for the App-minted token
+#      this workflow now uses (and `github-actions[bot]` for the legacy
+#      GITHUB_TOKEN fallback that no longer exists in this workflow). Neither
+#      identity is `dependabot[bot]`, so the resulting workflow run executes
+#      in Actions-secrets context — the auto-merge workflow's
+#      `DEPENDABOT_APPROVE_TOKEN` (a Dependabot secret) is unreadable there
+#      and its re-approve step no-ops. This workflow holds the codeowner-
+#      approver PAT in the Actions secret store (`secrets.CODEOWNER_APPROVER_TOKEN`)
+#      so the re-approval can restore the dismissed bot review from the
+#      Actions-side context.
+#   3. Auto-merge enable that silently failed (the case `verify_auto_merge_or_terminal`
+#      in dependabot-auto-merge.yaml exists to surface) and any dropped event from
+#      transient GitHub API errors.
+#
+# Triggers:
+#   - `workflow_run` on `Dependabot Auto-Merge` is the primary reactive trigger.
+#     The `push: main` event is suppressed when `secrets.GITHUB_TOKEN` causes the
+#     push (GitHub's anti-loop rule), which is exactly what happens when the
+#     auto-merge workflow's synchronous `gh pr merge --squash` lands a Dependabot
+#     PR — so `push: main` alone would miss the most important case. The
+#     `workflow_run` lifecycle event is NOT subject to that suppression.
+#   - `push: main` covers the remaining cases (human merges through the GitHub UI,
+#     PAT-authenticated merges, force pushes by a maintainer with admin rights).
+#   - `schedule` is the backstop that catches dropped events and transient failures.
+#   - `workflow_dispatch` is the manual escape hatch.
+#
+# Conservative by design: this workflow never invokes a synchronous merge
+# directly. It nudges PRs into states the existing infrastructure can complete —
+# updates BEHIND branches, posts one `@dependabot recreate` comment on real
+# conflicts, restores dismissed approvals on already-armed PRs, and ENABLES
+# auto-merge on approved+mergeable PRs via `gh pr merge --auto --squash`. That
+# last call IS the same one GitHub uses to merge synchronously when every
+# required protection on the PR is already satisfied at the moment of the
+# call (the common path for an APPROVED + MERGEABLE PR), so "enable auto-
+# merge" can complete an immediate merge in practice. The same pattern
+# governs `dependabot-auto-merge.yaml`'s `arm_auto_merge` helper. Anything
+# outside this set (terminally-failed required checks, missing tokens,
+# security-review labels, semver-major bumps without human approval) is left
+# for manual triage.
+#
+# Policy parity with `dependabot-auto-merge.yaml`:
+#   - Skips PRs labeled `trust-boundary` or `security-review-required` (re-checked
+#     immediately before every state-mutating action, fail-closed on query error).
+#   - Skips arming auto-merge for PRs containing a semver-major bump or the
+#     excluded dependency `openai/codex-action`. Detection reads the PR's first
+#     commit message — Dependabot's authoritative `updated-dependencies:` block.
+#     Mirrors the self-reference SHA→SHA same-version exemption derived by the
+#     auto-merge workflow's "Derive effective update-type" step in
+#     `dependabot-auto-merge.yaml`: a same-version bump of the dogfood self-
+#     reference (which fetch-metadata reports as semver-major) is treated as
+#     patch-equivalent so the reconciler's re-approve path doesn't strand a PR
+#     the auto-merge workflow already armed at open time. The exemption is
+#     verified against the commit-trailer metadata, not the PR title alone, so
+#     a mutated title cannot bypass the dependency gate.
+#
+# Failure isolation: per-PR work runs inside a function that handles transient
+# `gh` failures with explicit warnings and early returns rather than letting
+# `set -euo pipefail` abort the whole loop. One broken PR cannot strand the rest.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_run:
+    # Fires when the auto-merge workflow's run completes regardless of which
+    # token caused it. Required to react to `GITHUB_TOKEN`-driven merges, where
+    # the resulting `push: main` event is suppressed by GitHub's anti-loop rule.
+    # The `workflow_run` trigger only activates once this workflow file lives
+    # on the default branch (a structural GitHub Actions requirement, not a
+    # one-time merge gate).
+    workflows:
+      - "Dependabot Auto-Merge"
+    types:
+      - completed
+  schedule:
+    # Hourly. The reactive triggers above handle the BEHIND-after-merge case
+    # in seconds; the cron catches dropped events, transient API errors, and
+    # silent auto-merge enable failures that no event would re-fire.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# Singleton: serialize runs so any of the four triggers (`workflow_run` on
+# Dependabot Auto-Merge, `push: main`, `schedule`, `workflow_dispatch`)
+# cannot race the others on the same set of PRs. `cancel-in-progress` stays
+# false because each tick is a full reconciliation pass — canceling mid-
+# loop would leave some PRs unreconciled until the next trigger.
+concurrency:
+  group: dependabot-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # `workflow_run` fires for *every* completed run of the auto-merge workflow,
+    # which is itself triggered by `pull_request` events on every PR opened
+    # against the repo (its jobs short-circuit for non-Dependabot PRs but the
+    # workflow itself still runs to completion). Without a gate, every random
+    # PR opening would trigger this reconciler with `contents: write`,
+    # `issues: write`, and `pull-requests: write` and access to Actions
+    # secrets (including the configured PATs) — a needless privilege-
+    # escalation surface and DoS vector.
+    #
+    # Gate on TWO upstream-run properties, not just the branch name:
+    #
+    #   1. `head_repository.full_name == github.repository`. For fork PRs,
+    #      GitHub still populates `head_branch` with the bare branch name,
+    #      so an untrusted contributor could open a fork PR on a branch
+    #      named `dependabot/anything` and satisfy a branch-only predicate.
+    #      When the upstream auto-merge workflow then completes for that
+    #      fork PR, this reconciler would fire with `contents: write`,
+    #      `issues: write`, `pull-requests: write`, the configured PATs,
+    #      and the secrets context — a privilege-escalation vector the
+    #      in-script identity filter alone cannot close because the script
+    #      reconciles every open Dependabot PR globally, not just the
+    #      triggering one. Require the upstream run's head repository to
+    #      match `github.repository` so only in-repo branches are honored.
+    #   2. `startsWith(head_branch, 'dependabot/')`. Dependabot's own
+    #      branches always carry that prefix and the branch name is stable
+    #      across the synchronize chain — a reconciler-triggered
+    #      `gh pr update-branch` produces a new merge commit on the same
+    #      `dependabot/...` head regardless of which identity authored that
+    #      commit (currently `oss-automation-bot[bot]` via the App-minted
+    #      token), so the gate still passes for the App-authenticated
+    #      cascade. The narrower actor gates explored in earlier rounds
+    #      (`dependabot[bot]` only, then with `github-actions[bot]`) would
+    #      have skipped that cascade; this branch-name predicate covers it
+    #      independent of who pushed the merge commit.
+    #
+    # For non-`workflow_run` triggers (`push: main`, `schedule`,
+    # `workflow_dispatch`) the predicate short-circuits to true via the
+    # `event_name != 'workflow_run'` clause.
+    #
+    # In-script defense in depth: the `gh pr list --app dependabot` +
+    # `.author.login == "dependabot[bot]"` + `.isCrossRepository == false`
+    # filter further below remains the authoritative identity gate. A
+    # maintainer-created in-repo branch coincidentally named `dependabot/...`
+    # would pass this `if:` but exit 0 at the in-script filter because no
+    # Dependabot-authored PRs exist on it.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+      )
+    runs-on: ubuntu-latest
+    # Cap the reconciler at 30 minutes. The per-PR work is short
+    # (`gh pr view`, `gh pr update-branch`, `gh pr merge --auto`, plus an
+    # at-most-30 s mergeable poll on BEHIND PRs), but a hung gh API call or
+    # an unbounded backlog could otherwise tie up the singleton concurrency
+    # slot for GitHub's default 6 hours. 30 min matches the cap on
+    # `dependabot-auto-merge.yaml`'s `auto-merge` job and is well above the
+    # observed steady-state runtime (~seconds per PR, single-digit PRs per
+    # tick), so it surfaces a real hang as a failure without flaking on
+    # normal runs.
+    timeout-minutes: 30
+    permissions:
+      # Scopes granted to the workflow's default GITHUB_TOKEN. `gh pr
+      # update-branch` is NOT on this list — it runs with the
+      # `oss-automation-bot` App-minted token (see the `app-token` step
+      # below), which carries its own permission set independent of these
+      # scopes.
+      #
+      # GITHUB_TOKEN consumers in this workflow:
+      #   - `gh pr merge --auto --squash` needs `contents: write` (squash
+      #     merge mutates main's head) and `pull-requests: write` (mutates
+      #     PR state).
+      #   - `gh pr merge --disable-auto` needs `pull-requests: write` only.
+      #   - `gh pr comment` (the `@dependabot recreate` nudge) needs
+      #     `issues: write` because PR conversation comments are issue
+      #     comments in GitHub's permission model — without it the DIRTY
+      #     recreate path 403s.
+      # The codeowner-approver re-approval (`gh pr review --approve`) runs
+      # with `APPROVE_TOKEN` (a PAT), not GITHUB_TOKEN, so it doesn't
+      # require a scope here.
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      # Mint a short-lived token from the `oss-automation-bot` GitHub App.
+      # Used for `gh pr update-branch` so the resulting `synchronize` event
+      # is attributed to the App identity rather than to `GITHUB_TOKEN` —
+      # GitHub's anti-loop rule suppresses GITHUB_TOKEN-attributed
+      # synchronize events, which would otherwise prevent downstream
+      # required-check workflows from running on the new merge commit and
+      # leave the PR blocked by stale checks under
+      # `strict_required_status_checks_policy: true`.
+      #
+      # `release.yaml` uses the same `actions/create-github-app-token`
+      # minting shape against a different App (`codex-review-action-release-bot`,
+      # the Release Bot) — the cross-reference is to the pattern, not the
+      # identity. This workflow consumes the Automation Bot, which has a
+      # narrower blast radius than the Release Bot (the two-App split
+      # exists so a leak of the lower-risk identity doesn't force rotation
+      # of the higher-risk one). The `dependabot-auto-merge.yaml`
+      # rebuild-dist step is planned to migrate to this same Automation
+      # Bot identity in a follow-up.
+      - name: Mint oss-automation-bot token for update-branch
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
+
+      - name: Reconcile open Dependabot PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          # Codeowner-approver PAT. One identity, held in both stores under
+          # the same name: Actions store consumed here, Dependabot store
+          # consumed by `dependabot-auto-merge.yaml`'s auto-approval step.
+          # Workflows triggered by
+          # `push`/`schedule`/`workflow_run`/`workflow_dispatch` cannot read
+          # Dependabot secrets and vice versa, so the value lives in both
+          # stores; the trigger context determines which one this reference
+          # resolves against. If unset, re-approve degrades to a warning
+          # and the PR waits for manual approval.
+          APPROVE_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
+          # App-minted token from the `oss-automation-bot` step above. The
+          # `create-github-app-token` action fails the job if
+          # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
+          # missing, so by the time this step runs the token is always
+          # present — no fallback path needed.
+          UPDATE_BRANCH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Marker comment so the `@dependabot recreate` nudge is posted at most
+          # once per PR. Dependabot doesn't acknowledge the comment in a
+          # machine-readable way, so we gate on our own marker rather than
+          # parsing Dependabot's response.
+          RECREATE_MARKER: "<!-- dependabot-reconciler:recreate -->"
+        run: |
+          set -euo pipefail
+
+          # Tri-state security-review label query. Returns "true"/"false" on a
+          # successful gh response and "unknown" if the API call fails. Callers
+          # fail closed on "unknown" — same pattern as the helper in
+          # dependabot-auto-merge.yaml. Stderr is intentionally NOT redirected
+          # so the underlying gh failure lands in the workflow log.
+          security_review_state() {
+            local pr=$1 result
+            if ! result=$(gh pr view "$pr" --json labels --jq 'any(.labels[]; .name == "trust-boundary" or .name == "security-review-required")'); then
+              echo "unknown"
+              return
+            fi
+            echo "$result"
+          }
+
+          # Fetches the PR's first commit message (the Dependabot-authored one
+          # carrying the `updated-dependencies:` block) and echoes it to stdout.
+          # Callers capture via command substitution. Returns 0 on success, 1
+          # on API failure — callers fail closed by checking the exit status.
+          # Explicit return-via-stdout rather than mutating a caller-scoped
+          # variable so the data flow doesn't depend on bash dynamic scoping.
+          fetch_commit_message() {
+            local pr=$1
+            gh api "repos/$GH_REPO/pulls/$pr/commits" --jq '.[0].commit.message'
+          }
+
+          # Fail-closed security-review re-check, called immediately before every
+          # state-mutating action (update-branch, recreate comment, re-approve,
+          # arm auto-merge). Returns 0 only when the label state is definitively
+          # `false`; "true" and "unknown" both return non-zero with a warning so
+          # a label applied after the top-of-loop check cannot race past us.
+          gate_security_review() {
+            local pr=$1 stage=$2 srs
+            srs=$(security_review_state "$pr")
+            if [ "$srs" != "false" ]; then
+              echo "::warning::PR #${pr}: security-review state '$srs' immediately before ${stage}; skipping (fail-closed)."
+              return 1
+            fi
+            return 0
+          }
+
+          # Verify that `gh pr merge --auto` actually left the PR in a reconciled
+          # state. The command can exit 0 without `autoMergeRequest` being set —
+          # the exact silent enable failure this reconciler exists to catch — so
+          # checking the exit status alone would let us log "Armed auto-merge."
+          # while the PR remains stranded until the next tick, or indefinitely
+          # if the same false success repeats. Mirrors `verify_auto_merge_or_terminal`
+          # in dependabot-auto-merge.yaml. Distinguishes two failure modes so
+          # the caller can act differently:
+          #   0 — verified-armed-or-terminal: MERGED/CLOSED, or OPEN with an
+          #       active autoMergeRequest.
+          #   1 — definitively-not-armed: OPEN with autoMergeRequest=null, or
+          #       an unexpected PR state. Auto-merge demonstrably did not take,
+          #       so the caller has nothing to disable.
+          #   2 — state-unknown: the `gh pr view` API call itself failed. We
+          #       genuinely don't know whether auto-merge armed, so the caller
+          #       must perform best-effort cleanup. Even though the arm path
+          #       runs TWO `gate_security_review` calls before the merge (top-
+          #       of-block + immediate pre-merge), a `trust-boundary` /
+          #       `security-review-required` label could still land in the
+          #       inter-command gap between the second gate and the merge
+          #       itself; if it did, the reactive
+          #       `disable-auto-merge-on-security-review` job in
+          #       dependabot-auto-merge.yaml may have fired on the `labeled`
+          #       event before the arm completed — leaving nothing else to
+          #       disable auto-merge if the arm did in fact take.
+          verify_arm_or_terminal() {
+            local pr=$1 state_json pr_state has_auto
+            if ! state_json=$(gh pr view "$pr" --json state,autoMergeRequest); then
+              echo "::error::PR #${pr}: failed to verify PR state after gh pr merge --auto; cannot confirm whether auto-merge was actually enabled."
+              return 2
+            fi
+            pr_state=$(jq -r '.state' <<<"$state_json")
+            has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state_json")
+            case "$pr_state" in
+              MERGED|CLOSED)
+                echo "PR #${pr}: state is ${pr_state} after arm; reconciled."
+                return 0 ;;
+              OPEN)
+                if [ "$has_auto" = "true" ]; then
+                  return 0
+                fi
+                echo "::error::PR #${pr}: gh pr merge --auto exited cleanly but autoMergeRequest is still null on an OPEN PR — the enable failed silently (likely the github-actions bot lacks merge permission or the repository's 'Allow auto-merge' setting is disabled). Investigate immediately."
+                return 1 ;;
+              *)
+                echo "::error::PR #${pr}: unexpected PR state '${pr_state}' after auto-merge attempt; cannot confirm reconciliation."
+                return 1 ;;
+            esac
+          }
+
+          # Apply the dependency policy gates from dependabot-auto-merge.yaml so
+          # neither the re-approve path nor the arm-auto-merge path can act on a
+          # PR a maintainer left for manual review (semver-major bumps, excluded
+          # `openai/codex-action`). Returns 0 when the PR is eligible, 1 when a
+          # gate refuses, 2 on commit-metadata or PR-title fetch failure
+          # (fail-closed).
+          #
+          # The semver-major rejection mirrors the "effective update-type"
+          # derivation in `dependabot-auto-merge.yaml` and
+          # `dependabot-release-label.yaml`: a same-version SHA→SHA bump of the
+          # dogfood self-reference (`milanhorvatovic/codex-ai-code-review-action`)
+          # is conservatively reported by Dependabot/fetch-metadata as semver-
+          # major, but the auto-merge policy treats it as patch-equivalent.
+          # Without this exemption, a self-reference PR that the auto-merge
+          # workflow correctly armed would later go BEHIND, get
+          # `gh pr update-branch`-ed by the reconciler, have its bot review
+          # dismissed (`dismiss_stale_reviews_on_push: true`), and then have
+          # the reconciler refuse to re-approve — stranding the prior policy
+          # decision indefinitely.
+          #
+          # The exemption is verified against two sources to defeat title-
+          # mutability attacks: (a) parse the PR title — Dependabot's canonical
+          # single-dep title format is `chore: bump <name> from <prev> to <new>`
+          # — to extract the claimed `<name>`, `<prev>`, `<new>` (the self-
+          # reference is always a single-dep PR because it's listed under
+          # `exclude-patterns` in `.github/dependabot.yaml`, so it never joins
+          # the github-actions group); (b) cross-check against the already-
+          # fetched commit metadata, requiring exactly one `dependency-name:`
+          # trailer line that names the self-reference. The PR title alone is
+          # mutable — a maintainer or write-scoped bot can edit it, so a
+          # forged title on an unrelated semver-major Dependabot PR must not
+          # be sufficient to clear the gate. A title-vs-metadata mismatch
+          # falls through to the semver-major rejection (`return 1`).
+          check_dependency_gates() {
+            local pr=$1 stage=$2 commit_msg pr_title self_ref="$GH_REPO"
+            if ! commit_msg=$(fetch_commit_message "$pr"); then
+              echo "::warning::PR #${pr}: failed to fetch commit metadata; skipping ${stage} (fail-closed)."
+              return 2
+            fi
+            # Require the Dependabot metadata trailers to exist before we
+            # can classify the PR. Absent `update-type:` lines means we are
+            # looking at a non-Dependabot-authored commit (a maintainer
+            # amended/rebased, the commit message was scrubbed, or Dependabot
+            # changed its format) — without the trailer we cannot
+            # distinguish patch from semver-major, and silently returning 0
+            # would let a semver-major bump through the gate. Fail closed:
+            # reject the stage and warn so the maintainer can investigate.
+            if ! grep -q "update-type: " <<<"$commit_msg"; then
+              echo "::warning::PR #${pr}: commit message does not contain a Dependabot 'update-type:' trailer; cannot classify effective update-type, failing closed and not performing ${stage}."
+              return 1
+            fi
+            # Excluded-dep gate runs first — independent of effective update-type.
+            if grep -q "dependency-name: openai/codex-action" <<<"$commit_msg"; then
+              echo "PR #${pr}: contains the excluded dependency openai/codex-action; manual review required, not performing ${stage}."
+              return 1
+            fi
+            # Non-semver-major: eligible without further checks.
+            if ! grep -q "update-type: version-update:semver-major" <<<"$commit_msg"; then
+              return 0
+            fi
+            # Semver-major present. Check if this is the self-reference same-
+            # version exemption by parsing the PR title AND cross-checking
+            # against the commit-trailer metadata.
+            if ! pr_title=$(gh pr view "$pr" --json title --jq '.title'); then
+              echo "::warning::PR #${pr}: failed to fetch PR title for self-reference same-version check; failing closed and rejecting ${stage}."
+              return 2
+            fi
+            if [[ "$pr_title" =~ bump[[:space:]]+([^[:space:]]+)[[:space:]]+from[[:space:]]+([^[:space:]]+)[[:space:]]+to[[:space:]]+([^[:space:]]+) ]]; then
+              local dep_name="${BASH_REMATCH[1]}" prev_ver="${BASH_REMATCH[2]}" new_ver="${BASH_REMATCH[3]}"
+              if [ "$dep_name" = "$self_ref" ] && [ "$prev_ver" = "$new_ver" ]; then
+                # Cross-check the title's claim against the commit trailers.
+                # The Dependabot commit message lists every updated dep as a
+                # YAML-style `dependency-name: <name>` line; counting them
+                # establishes single-dep (grouped PRs would have >1, and the
+                # self-reference is excluded from the github-actions group),
+                # and the named dep on that single line must equal the self-
+                # reference for the exemption to be honored. Any mismatch
+                # (multi-dep PR, different dep, or absent metadata) is
+                # treated as a forged title and falls through to the
+                # semver-major rejection below.
+                local dep_name_count metadata_dep
+                dep_name_count=$(grep -c "dependency-name:" <<<"$commit_msg" || true)
+                # `|| true` on the pipeline because a missing `dependency-name:`
+                # trailer makes `grep -m1` exit 1 and the substitution's
+                # non-zero status would abort the run under `set -euo pipefail`.
+                # The surrounding logic expects malformed metadata to fall
+                # through to the rejection branch as a per-PR no-op, not to
+                # strand the entire reconciler tick.
+                metadata_dep=$(grep -m1 "dependency-name:" <<<"$commit_msg" | sed -e 's/.*dependency-name:[[:space:]]*//' -e 's/[[:space:]]*$//' || true)
+                if [ "$dep_name_count" = "1" ] && [ "$metadata_dep" = "$self_ref" ]; then
+                  echo "PR #${pr}: self-reference SHA→SHA same-version bump (${prev_ver}); treating as patch-equivalent, allowing ${stage}."
+                  return 0
+                fi
+                echo "::warning::PR #${pr}: PR title claims self-reference same-version bump but commit metadata does not confirm (dependency-name lines=${dep_name_count}, first metadata dep='${metadata_dep}'); rejecting exemption."
+              fi
+            fi
+            echo "PR #${pr}: contains a semver-major update; manual review required, not performing ${stage}."
+            return 1
+          }
+
+          # DIRTY-path handler (real merge conflict). Posts the one-shot
+          # `@dependabot recreate` nudge, gated by the marker comment so we
+          # don't spam the PR. Extracted into a helper so the BEHIND→DIRTY
+          # transition discovered after `update-branch` can re-enter the same
+          # logic instead of waiting for the next reconciler tick.
+          #
+          # The marker lookup has three properties:
+          #   1. Server-side jq with `--arg` so the literal HTML-comment
+          #      characters in $RECREATE_MARKER never participate in shell
+          #      or jq quoting.
+          #   2. The comments payload is captured into a bash variable so
+          #      the gh fetch failure can be detected separately from a
+          #      successful empty-match result; the variable is then fed to
+          #      jq's stdin (rather than walked with `grep`), so the marker
+          #      test uses jq's JSON-aware string semantics on the parsed
+          #      structure instead of relying on `grep -qF` over a flattened
+          #      string.
+          #   3. The match is restricted to comments authored by
+          #      `github-actions[bot]` (the identity this workflow posts
+          #      under, via the default GH_TOKEN). Without that author
+          #      filter, an arbitrary commenter on a public PR could pre-
+          #      seed the marker into their own comment body and suppress
+          #      this workflow's only recreate-nudge for a real DIRTY
+          #      Dependabot PR. The author check is load-bearing for the
+          #      duplicate-suppression guarantee.
+          handle_dirty() {
+            local pr=$1 comments_json
+            echo "DIRTY (real conflict)."
+            if ! comments_json=$(gh pr view "$pr" --json comments); then
+              echo "::warning::PR #${pr}: failed to fetch comments; skipping recreate posting (fail-closed to avoid duplicate comments)."
+              return 0
+            fi
+            # Marker-match restricted to comments authored by
+            # `github-actions[bot]` — the identity this workflow posts under
+            # (via the default `GH_TOKEN`/`secrets.GITHUB_TOKEN`). Without
+            # the author filter, an arbitrary commenter on a public PR could
+            # pre-seed the HTML marker into a comment body and suppress this
+            # workflow's only recreate-nudge for a real DIRTY Dependabot PR,
+            # leaving the PR stuck. Note: if the comment-posting identity is
+            # ever migrated to a different bot (e.g., `oss-automation-bot`),
+            # update the author check here in lockstep.
+            if jq -e --arg marker "$RECREATE_MARKER" 'any(.comments[]; .author.login == "github-actions[bot]" and (.body | contains($marker)))' <<<"$comments_json" >/dev/null; then
+              echo "Recreate comment already posted; skipping."
+              return 0
+            fi
+            # Re-check the security-review state immediately before commenting —
+            # posting `@dependabot recreate` on a PR a maintainer just flagged
+            # for manual review would defeat the policy. Posting a comment is a
+            # write the policy can refuse.
+            if ! gate_security_review "$pr" "recreate comment"; then
+              return 0
+            fi
+            if ! gh pr comment "$pr" --body "${RECREATE_MARKER}"$'\n@dependabot recreate'; then
+              echo "::warning::PR #${pr}: failed to post recreate comment."
+            else
+              echo "Posted @dependabot recreate."
+            fi
+            return 0
+          }
+
+          # Per-PR reconciliation. Always returns 0 — every failure path emits a
+          # `::warning::` and returns early so the outer loop continues with the
+          # next PR. Never let an unhandled non-zero exit escape this function;
+          # `set -e` at the top level would otherwise kill the whole run.
+          reconcile_pr() {
+            local pr=$1
+            local state merge_state mergeable review has_auto srs verify_rc
+
+            if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
+              echo "::warning::PR #${pr}: failed to fetch PR state; skipping this iteration."
+              return 0
+            fi
+
+            # Pre-action security-review check. Fail-closed: if the label state
+            # is unknown we don't take any state-mutating action on this PR.
+            srs=$(security_review_state "$pr")
+            case "$srs" in
+              true)
+                echo "Security-review labeled; skipping."
+                return 0 ;;
+              unknown)
+                echo "::warning::PR #${pr}: security-review state unknown; skipping (fail-closed)."
+                return 0 ;;
+            esac
+
+            merge_state=$(jq -r '.mergeStateStatus' <<<"$state")
+            mergeable=$(jq -r '.mergeable' <<<"$state")
+            review=$(jq -r '.reviewDecision // ""' <<<"$state")
+            has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
+
+            if [ "$merge_state" = "BEHIND" ]; then
+              # Re-check the security-review state immediately before mutating
+              # the PR branch — a maintainer may have applied the label since
+              # the top-of-function check, and update-branch is itself a write.
+              if ! gate_security_review "$pr" "update-branch"; then
+                return 0
+              fi
+              echo "BEHIND main; calling update-branch."
+              # `UPDATE_BRANCH_TOKEN` is the `oss-automation-bot` App-minted
+              # token from the workflow-level `app-token` step. The
+              # `create-github-app-token` action fails the job upstream if
+              # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY`
+              # is missing, so the token is guaranteed present here — no
+              # fallback path needed. Using the App identity instead of
+              # `GITHUB_TOKEN` ensures the resulting `synchronize` event is
+              # forwarded to downstream required-check workflows
+              # (GITHUB_TOKEN's would be suppressed by GitHub's anti-loop
+              # rule and the PR would stay blocked by stale checks under
+              # `strict_required_status_checks_policy: true`).
+              if ! GH_TOKEN="$UPDATE_BRANCH_TOKEN" gh pr update-branch "$pr"; then
+                echo "::warning::PR #${pr}: update-branch failed (transient API error or branch protection refused the update)."
+                return 0
+              fi
+              # Refresh state: the merge commit may have dismissed the bot
+              # review, flipped `mergeable`, or invalidated `autoMergeRequest`.
+              # Without a refresh the downstream decisions operate on stale
+              # data and could arm auto-merge against a head that no longer
+              # satisfies the ruleset. We also re-read `mergeStateStatus` so a
+              # BEHIND→DIRTY transition (the merge commit produced a real
+              # conflict) is handled this tick instead of waiting an hour.
+              if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
+                echo "::warning::PR #${pr}: state refresh after update-branch failed; skipping downstream actions."
+                return 0
+              fi
+              merge_state=$(jq -r '.mergeStateStatus' <<<"$state")
+              mergeable=$(jq -r '.mergeable' <<<"$state")
+              review=$(jq -r '.reviewDecision // ""' <<<"$state")
+              has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
+              if [ "$merge_state" = "DIRTY" ]; then
+                handle_dirty "$pr"
+                return 0
+              fi
+              # GitHub recomputes `mergeable` asynchronously after a merge
+              # commit lands on the PR branch. Immediately after a successful
+              # `update-branch` it commonly reports `UNKNOWN` for a few seconds
+              # — the arm-auto-merge gate below requires `MERGEABLE`, so without
+              # a brief poll we'd skip this PR every tick the recompute hadn't
+              # converged and a Monday batch would take multiple hours to drain.
+              # Three retries × 10 s is bounded (≤30 s per BEHIND PR) and only
+              # runs on the small subset of PRs that just went through
+              # update-branch this tick.
+              local attempt
+              for attempt in 1 2 3; do
+                if [ "$mergeable" != "UNKNOWN" ]; then
+                  break
+                fi
+                sleep 10
+                echo "PR #${pr}: mergeable=UNKNOWN after update-branch; re-querying (attempt ${attempt}/3)."
+                if ! state=$(gh pr view "$pr" --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest); then
+                  echo "::warning::PR #${pr}: state re-query during mergeable poll failed; continuing with last-known values."
+                  break
+                fi
+                merge_state=$(jq -r '.mergeStateStatus' <<<"$state")
+                mergeable=$(jq -r '.mergeable' <<<"$state")
+                review=$(jq -r '.reviewDecision // ""' <<<"$state")
+                has_auto=$(jq -r '.autoMergeRequest != null' <<<"$state")
+                if [ "$merge_state" = "DIRTY" ]; then
+                  handle_dirty "$pr"
+                  return 0
+                fi
+              done
+            elif [ "$merge_state" = "DIRTY" ]; then
+              # Real conflict — Dependabot's auto-rebase can't resolve it.
+              # Drop a one-shot `@dependabot recreate` so Dependabot rebuilds
+              # the PR from scratch. Marker-gated to avoid spamming the PR
+              # on every hourly tick.
+              handle_dirty "$pr"
+              return 0
+            fi
+
+            # Re-approve only when auto-merge is already armed. That signal
+            # means dependabot-auto-merge.yaml previously cleared every policy
+            # gate (semver-major exclusion, openai/codex-action exclude list,
+            # security-review labels) and approved the PR — so a dismissed
+            # review here can only mean a push (typically our own
+            # update-branch) cleared it. Restoring approval matches the prior
+            # policy decision exactly. Without this gate we'd risk auto-
+            # approving PRs that were intentionally left unapproved.
+            if [ "$has_auto" = "true" ] && [ "$review" != "APPROVED" ]; then
+              # A non-APPROVED reviewDecision on an armed PR is not unique to a
+              # dismissed bot approval. It also matches:
+              #   - CHANGES_REQUESTED: a deliberate maintainer block — never re-approve.
+              #   - A maintainer manually enabling auto-merge for a semver-major
+              #     or excluded-dep PR (so a human can review). Posting a fresh
+              #     bot approval would let that PR auto-merge despite the policy.
+              # Skip CHANGES_REQUESTED outright, then re-run the same dependency
+              # policy gates the arm path uses so the reconciler can never re-
+              # approve a PR the auto-merge workflow itself would have refused.
+              if [ "$review" = "CHANGES_REQUESTED" ]; then
+                echo "PR #${pr}: reviewDecision=CHANGES_REQUESTED; not re-approving (deliberate maintainer block)."
+                return 0
+              fi
+              # A dismissed approval on an armed PR is exactly the case where a
+              # policy bypass would otherwise be silent — re-check the label
+              # state immediately before posting a new review.
+              if ! gate_security_review "$pr" "re-approve"; then
+                return 0
+              fi
+              if ! check_dependency_gates "$pr" "re-approve"; then
+                return 0
+              fi
+              if [ -n "${APPROVE_TOKEN:-}" ]; then
+                if GH_TOKEN="$APPROVE_TOKEN" gh pr review --approve \
+                    --body "Re-approved by dependabot-reconciler after the prior approval was dismissed (typically by an automated update-branch push)." \
+                    "$pr"; then
+                  # `gh pr review --approve` can exit 0 even when the PAT
+                  # identity does not satisfy the branch ruleset's CODEOWNER
+                  # requirement — in that case GitHub records the review but
+                  # the authoritative `reviewDecision` stays `REVIEW_REQUIRED`
+                  # and the PR cannot auto-merge. Re-query the decision after
+                  # the post; only treat the approval as effective when
+                  # GitHub agrees. A REVIEW_REQUIRED result after a 0-exit
+                  # approval is the canonical sign of a non-CODEOWNER PAT;
+                  # surface it with a `::warning::` pointing at the token
+                  # config so maintainers don't chase symptoms downstream.
+                  local post_approve_decision
+                  if ! post_approve_decision=$(gh pr view "$pr" --json reviewDecision --jq '.reviewDecision'); then
+                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision re-query failed; cannot confirm CODEOWNER satisfaction. Auto-merge may remain blocked; manual approval may still be required."
+                  elif [ "$post_approve_decision" = "APPROVED" ]; then
+                    review="APPROVED"
+                    echo "Re-approved."
+                  else
+                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision is '${post_approve_decision}' (need APPROVED). The CODEOWNER_APPROVER_TOKEN identity likely does not satisfy the branch ruleset's CODEOWNER requirement; auto-merge will remain blocked. Configure a token belonging to a code-owner."
+                  fi
+                else
+                  echo "::warning::PR #${pr}: re-approve failed (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a non-CODEOWNER identity)."
+                fi
+              else
+                echo "::warning::PR #${pr} is auto-merge-armed but reviewDecision=${review} and CODEOWNER_APPROVER_TOKEN is unset; cannot restore approval. Configure the secret or approve manually."
+              fi
+            fi
+
+            # Arm auto-merge if the PR is otherwise ready. Apply the full set
+            # of policy gates from `dependabot-auto-merge.yaml` so this
+            # workflow can never enable auto-merge on a PR that workflow
+            # deliberately left unarmed (e.g., semver-major bumps a human
+            # approved for review, or any PR touching `openai/codex-action`).
+            if [ "$has_auto" = "false" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$review" = "APPROVED" ]; then
+              if ! gate_security_review "$pr" "arm auto-merge"; then
+                return 0
+              fi
+              if ! check_dependency_gates "$pr" "arm auto-merge"; then
+                return 0
+              fi
+              # Re-check the security-review state IMMEDIATELY before the
+              # merge call. `gh pr merge --auto --squash` can perform a
+              # synchronous merge (not just enable auto-merge) when the PR
+              # already satisfies every branch protection rule at this
+              # instant, which is the common path for the reconciler's arm
+              # branch (we only get here on `mergeable=MERGEABLE` +
+              # `review=APPROVED`). Between the earlier `gate_security_review`
+              # at the top of this block and this point we did several gh
+              # API calls (commit metadata fetch, optional PR title fetch
+              # inside `check_dependency_gates`), giving a maintainer a
+              # multi-second window to apply `trust-boundary` /
+              # `security-review-required`. If that label landed before the
+              # merge happens, the post-arm cleanup further below cannot
+              # revoke an already-completed merge. This pre-merge re-check
+              # narrows the race to the inter-command latency of the next
+              # two gh calls, which is the tightest possible without
+              # promoting the label-presence policy to a required status
+              # check on the branch ruleset.
+              if ! gate_security_review "$pr" "arm auto-merge (pre-merge re-check)"; then
+                return 0
+              fi
+              # Tolerate a non-zero exit from `gh pr merge --auto --squash`
+              # here: the failure is just as likely to be a benign race
+              # against the existing `dependabot-auto-merge.yaml` workflow
+              # (which can have merged the PR or armed auto-merge between
+              # our last `gh pr view` above and this call — "PR already
+              # merged" / "auto-merge already enabled" both return non-zero
+              # from gh) as it is a persistent configuration failure. The
+              # immediate exit code can't distinguish the two; `verify_arm_or_terminal`
+              # below queries the authoritative post-arm state and decides:
+              # MERGED/CLOSED or OPEN-with-autoMergeRequest is success; OPEN
+              # with autoMergeRequest=null is the silent enable failure that
+              # routes to `had_critical_error`. Mirrors the canonical pattern
+              # in `dependabot-auto-merge.yaml`'s `arm_auto_merge` helper.
+              gh pr merge --auto --squash "$pr" 2>&1 || true
+              # `gh pr merge --auto` can exit 0 without actually enabling
+              # auto-merge — the silent-enable-failure case this workflow
+              # exists to backstop. Verify the PR state genuinely reflects the
+              # arm (or terminal MERGED/CLOSED) before trusting the success
+              # path; on verification failure, fail the run via the sticky
+              # `had_critical_error` flag so a recurring silent failure can't
+              # leave the PR stranded indefinitely.
+              #
+              # Capture the exit code distinctly so we can branch on it:
+              #   1 — definitively-not-armed: nothing to disable.
+              #   2 — state-unknown: the post-arm verify gh API call failed,
+              #       so we can't rule out that auto-merge actually armed. If
+              #       a `trust-boundary` / `security-review-required` label
+              #       landed during the arm window, the reactive
+              #       `disable-auto-merge-on-security-review` job may have
+              #       fired on the `labeled` event before the arm completed
+              #       — meaning nothing else will disable auto-merge if the
+              #       arm did in fact take. Best-effort `--disable-auto`
+              #       closes that gap. The disable may itself return non-zero
+              #       (if auto-merge never armed there's nothing to disable);
+              #       that's acceptable in this branch.
+              if verify_arm_or_terminal "$pr"; then
+                verify_rc=0
+              else
+                verify_rc=$?
+              fi
+              if [ "$verify_rc" -ne 0 ]; then
+                if [ "$verify_rc" = "2" ]; then
+                  case "$(security_review_state "$pr")" in
+                    true|unknown)
+                      echo "::warning::PR #${pr}: post-arm verify could not confirm whether auto-merge actually armed; security-review state is non-false. Attempting best-effort --disable-auto to close the silent-arm-plus-label race."
+                      if ! gh pr merge --disable-auto "$pr"; then
+                        echo "::warning::PR #${pr}: best-effort --disable-auto returned non-zero; this is expected if auto-merge never armed."
+                      fi ;;
+                  esac
+                fi
+                had_critical_error=1
+                return 0
+              fi
+              # Post-arm security-review re-check. The arm path has two
+              # races against a maintainer applying `trust-boundary` /
+              # `security-review-required` — this block handles the second:
+              #   - Pre-merge race (label applied between the top-of-block
+              #     `gate_security_review` and the merge call): closed by
+              #     the immediate-pre-merge `gate_security_review` added
+              #     just above this section. If the label landed before the
+              #     merge fired, that gate refuses and we never reach here.
+              #   - Post-enable async race (label applied after
+              #     `gh pr merge --auto` enabled auto-merge but before the
+              #     async merge actually completes): the arm has taken,
+              #     `--auto` is now armed on a PR the policy says must be
+              #     manual, and the reactive
+              #     `disable-auto-merge-on-security-review` job in
+              #     dependabot-auto-merge.yaml may have already fired on
+              #     the `labeled` event before our arm completed (so it has
+              #     nothing left to revoke). This block is what catches
+              #     that case: re-query the label state and defensively
+              #     disable auto-merge on `true` or `unknown`.
+              # If the defensive `--disable-auto` itself fails, the PR
+              # remains armed for auto-merge despite the policy requiring
+              # manual review — a silent policy bypass. Mirror the
+              # `arm_auto_merge` helper in dependabot-auto-merge.yaml:
+              # that workflow `return 1`s in this situation so the job
+              # fails loudly. Per-PR isolation means we can't `exit 1`
+              # here without stranding the remaining PRs, so we set a
+              # sticky `had_critical_error` flag that the outer `for pr`
+              # loop reads to fail the run after every PR has been
+              # processed.
+              case "$(security_review_state "$pr")" in
+                true)
+                  echo "::error::PR #${pr}: security-review label landed during the arm window; reverting auto-merge."
+                  if ! gh pr merge --disable-auto "$pr"; then
+                    echo "::error::PR #${pr}: failed to disable auto-merge on a security-review PR. The PR may still merge automatically when conditions are met, bypassing the policy that requires manual maintainer review. Investigate immediately."
+                    had_critical_error=1
+                  fi
+                  return 0 ;;
+                unknown)
+                  echo "::error::PR #${pr}: failed to verify security-review label state after arming auto-merge. Defensively disabling auto-merge to avoid a possible policy bypass — the reactive disable-auto-merge job only fires on the labeled event, which may have already run before this point."
+                  if ! gh pr merge --disable-auto "$pr"; then
+                    echo "::error::PR #${pr}: failed to defensively disable auto-merge on a possibly security-review-required PR. Investigate immediately."
+                    had_critical_error=1
+                  fi
+                  return 0 ;;
+              esac
+              echo "Armed auto-merge."
+            fi
+
+            return 0
+          }
+
+          # Two-step list so a `gh pr list` failure is surfaced rather than
+          # collapsing silently to an empty array. `mapfile < <(...)` discards
+          # the command-substitution exit status: a transient API error there
+          # would otherwise look like an empty backlog ("No open Dependabot
+          # PRs.", exit 0) and mask the underlying gh failure. Capture the JSON
+          # into a variable first; if that fails, exit non-zero so the run is
+          # visibly broken and re-fires on the next trigger.
+          #
+          # `--limit 200` covers any plausible burst — Monday Dependabot batches
+          # plus active feature PRs sit well under that. The default of 30
+          # would silently truncate during a backlog.
+          #
+          # `--app "dependabot"` is the gh CLI's purpose-built filter for
+          # GitHub App authors and is semantically clearer than the equivalent
+          # `--author "app/dependabot"` (the legacy form still works on gh
+          # 2.89, but `--app` is the documented path forward — see
+          # `gh pr list --help`). The jq filter below remains the
+          # authoritative identity check: `.author.login == "dependabot[bot]"`
+          # matches the `github.event.pull_request.user.login == 'dependabot[bot]'`
+          # filter used by dependabot-auto-merge.yaml and
+          # dependabot-release-label.yaml, so all three workflows operate on
+          # the same set regardless of how gh CLI evolves the `--app` /
+          # `--author` filters.
+          #
+          # `isCrossRepository == false` matches the existing auto-merge
+          # workflow's filter on `head.repo.full_name == github.repository`.
+          # Dependabot doesn't normally open PRs from forks, but a defensive
+          # filter keeps the reconciler from acting on any future cross-repo
+          # bot PR that happened to share the Dependabot app identity.
+          if ! prs_json=$(gh pr list \
+              --app "dependabot" --state open --limit 200 \
+              --json number,author,isCrossRepository); then
+            echo "::error::Failed to list open Dependabot PRs; aborting this tick (next scheduled run will retry)."
+            exit 1
+          fi
+          mapfile -t prs < <(jq -r '.[] | select(.author.login == "dependabot[bot]" and .isCrossRepository == false) | .number' <<<"$prs_json")
+
+          if [ "${#prs[@]}" -eq 0 ]; then
+            echo "No open in-repository Dependabot PRs."
+            exit 0
+          fi
+
+          # Sticky cross-PR failure flag. `reconcile_pr` always returns 0 to
+          # preserve per-PR isolation (one transient `gh` error must not strand
+          # the rest of the backlog), but a handful of per-PR conditions are
+          # too severe to silently log — surfacing them as a red workflow run
+          # is the maintainer's only signal that the reconciler is no longer
+          # doing its job. Each PR's handler sets `had_critical_error=1` on
+          # any of these conditions:
+          #
+          #   1. `verify_arm_or_terminal` returned `1` (definitively-not-armed:
+          #      gh exited cleanly but the PR is OPEN with `autoMergeRequest`
+          #      still null) or `2` (state-unknown: post-arm `gh pr view` API
+          #      call itself failed and we can't confirm whether arm took).
+          #      This is the canonical "silent enable failure" signal — the
+          #      reconciler tolerates a non-zero exit from `gh pr merge --auto`
+          #      itself (it can be a benign race against the existing auto-
+          #      merge workflow merging or arming the same PR concurrently)
+          #      and lets the authoritative post-arm state read decide.
+          #   2. A failed defensive `gh pr merge --disable-auto` after a
+          #      security-review label landed during the arm window — the
+          #      original policy-bypass case the flag was introduced for.
+          #
+          # The loop-end check exits 1 so the run goes red. Mirrors the
+          # `return 1` shape used by the canonical `arm_auto_merge` helper in
+          # `dependabot-auto-merge.yaml`.
+          had_critical_error=0
+
+          for pr in "${prs[@]}"; do
+            echo "::group::PR #${pr}"
+            reconcile_pr "$pr"
+            echo "::endgroup::"
+          done
+
+          if [ "$had_critical_error" = "1" ]; then
+            echo "::error::At least one PR encountered a critical reconciler failure (silent or unverifiable auto-merge enable, or failed defensive disable on a security-review PR). Failing the run so the issue surfaces; see per-PR ::error:: lines above for the specific cause."
+            exit 1
+          fi

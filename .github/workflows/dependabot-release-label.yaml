@@ -18,9 +18,12 @@ name: Dependabot Release Label
 #      PRs. A standalone semver-major PR inherits `release: patch` from
 #      the static config, which would mis-classify it for the release-prep
 #      automation. This workflow recomputes the effective update-type and
-#      REPLACES the static `release: patch` with `release: major` when the
-#      two disagree. (Patch and minor bumps stay through the fast path:
-#      the static label is already correct.)
+#      REPLACES the static `release: patch` with `release: major` for that
+#      standalone case only — grouped patch/minor PRs keep the static
+#      `release: patch` even when the group's effective update-type rolls
+#      up to `version-update:semver-minor`, because the static label
+#      encodes the project's policy that grouped patch/minor bumps release
+#      as patch.
 #
 # Effective-update-type derivation mirrors `dependabot-auto-merge.yaml` so
 # SHA→SHA same-version dogfood self-reference bumps (which `fetch-metadata`
@@ -119,21 +122,34 @@ jobs:
           current_json="$(list_release_labels)"
           current_count=$(jq 'length' <<<"$current_json")
 
-          # Four cases to handle:
-          #   - 0 release labels  → add the desired one (security-update
-          #     backstop case: Dependabot didn't apply the static label).
-          #   - 1 label matching  → no-op (fast path: the static label from
-          #     dependabot.yaml is already correct, which is the common case
-          #     for grouped patch/minor bumps).
-          #   - 1 label mismatch  → replace it with the desired one
-          #     (standalone-semver-major correction case: the static
-          #     `release: patch` from dependabot.yaml doesn't match the
-          #     effective update-type, typically because a semver-major
-          #     bump split out of its group as a standalone PR).
-          #   - >1 labels         → maintainer applied an additional release
-          #     label manually; leave the conflict for `verify-pr-release-label`
-          #     to flag and the maintainer to triage. The workflow shouldn't
-          #     second-guess a manual override.
+          # Decision tree:
+          #   - 0 release labels → add `desired` (security-update backstop
+          #     case: Dependabot didn't inherit the static label list from
+          #     `.github/dependabot.yaml`).
+          #   - 1 label matching `desired` → no-op (fast path: the static
+          #     label is already correct).
+          #   - 1 label not matching `desired`:
+          #       - If `desired == "release: major"` → replace. This is the
+          #         standalone-semver-major correction case: dependabot.yaml
+          #         applies `release: patch` to every PR from the configured
+          #         groups, but a semver-major bump splits out of its group
+          #         as a standalone PR (because of the group's
+          #         `update-types: [minor, patch]` filter) and inherits the
+          #         wrong static label.
+          #       - Otherwise → keep the current label. dependabot.yaml's
+          #         static `release: patch` encodes the user's intent that
+          #         grouped patch/minor bumps release as patch, even when
+          #         the group's effective update-type rolls up to
+          #         `version-update:semver-minor` (a group containing any
+          #         minor bump alongside patches). The workflow MUST NOT
+          #         relabel grouped minor PRs to `release: minor` — that
+          #         would contradict the dependabot.yaml comments and turn
+          #         routine minor dependency bumps into minor releases of
+          #         this Action. Maintainer-applied overrides like
+          #         `release: skip` are preserved here for the same reason.
+          #   - >1 labels → leave for `verify-pr-release-label` to flag and
+          #     the maintainer to triage. The workflow shouldn't second-
+          #     guess a manual override.
           if [ "$current_count" = "0" ]; then
             echo "No release label present; adding '$desired'."
             gh pr edit "$PR_URL" --add-label "$desired"
@@ -143,7 +159,11 @@ jobs:
               echo "Release label '$desired' already correct; nothing to do."
               exit 0
             fi
-            echo "Replacing '$current' with '$desired' (effective update-type: $UPDATE_TYPE)."
+            if [ "$desired" != "release: major" ]; then
+              echo "Keeping '$current' (effective update-type: $UPDATE_TYPE). The static label encodes the grouped patch/minor intent from dependabot.yaml; only standalone semver-major PRs get auto-corrected."
+              exit 0
+            fi
+            echo "Replacing '$current' with '$desired' (standalone semver-major correction; effective update-type: $UPDATE_TYPE)."
             gh pr edit "$PR_URL" --add-label "$desired" --remove-label "$current"
           else
             echo "::warning::PR has multiple release labels ($(jq -c '.' <<<"$current_json")); leaving as-is for manual triage."

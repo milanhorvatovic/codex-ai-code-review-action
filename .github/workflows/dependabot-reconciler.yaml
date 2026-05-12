@@ -80,8 +80,9 @@ on:
     # Fires when the auto-merge workflow's run completes regardless of which
     # token caused it. Required to react to `GITHUB_TOKEN`-driven merges, where
     # the resulting `push: main` event is suppressed by GitHub's anti-loop rule.
-    # The workflow file must be on the default branch for this trigger to be
-    # registered — that happens once this PR merges.
+    # The `workflow_run` trigger only activates once this workflow file lives
+    # on the default branch (a structural GitHub Actions requirement, not a
+    # one-time merge gate).
     workflows:
       - "Dependabot Auto-Merge"
     types:
@@ -97,10 +98,11 @@ permissions:
   contents: read
   pull-requests: read
 
-# Singleton: serialize runs so a manual dispatch or scheduled tick can't race
-# the reactive `push: main` run on the same set of PRs. `cancel-in-progress`
-# stays false because each tick is a full reconciliation pass — canceling
-# mid-loop would leave some PRs unreconciled until the next trigger.
+# Singleton: serialize runs so any of the four triggers (`workflow_run` on
+# Dependabot Auto-Merge, `push: main`, `schedule`, `workflow_dispatch`)
+# cannot race the others on the same set of PRs. `cancel-in-progress` stays
+# false because each tick is a full reconciliation pass — canceling mid-
+# loop would leave some PRs unreconciled until the next trigger.
 concurrency:
   group: dependabot-reconciler
   cancel-in-progress: false
@@ -134,11 +136,13 @@ jobs:
     #      branches always carry that prefix and the branch name is stable
     #      across the synchronize chain — a reconciler-triggered
     #      `gh pr update-branch` produces a new merge commit on the same
-    #      `dependabot/...` head, so the gate still passes for PAT-
-    #      authenticated cascades. The narrower actor gates explored in
-    #      earlier rounds (`dependabot[bot]` only, then with
-    #      `github-actions[bot]`) would skip the PAT-cascade case; this
-    #      branch-name predicate covers it.
+    #      `dependabot/...` head regardless of which identity authored that
+    #      commit (currently `oss-automation-bot[bot]` via the App-minted
+    #      token), so the gate still passes for the App-authenticated
+    #      cascade. The narrower actor gates explored in earlier rounds
+    #      (`dependabot[bot]` only, then with `github-actions[bot]`) would
+    #      have skipped that cascade; this branch-name predicate covers it
+    #      independent of who pushed the merge commit.
     #
     # For non-`workflow_run` triggers (`push: main`, `schedule`,
     # `workflow_dispatch`) the predicate short-circuits to true via the

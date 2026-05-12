@@ -521,8 +521,25 @@ jobs:
                 if GH_TOKEN="$APPROVE_TOKEN" gh pr review --approve \
                     --body "Re-approved by dependabot-reconciler after the prior approval was dismissed (typically by an automated update-branch push)." \
                     "$pr"; then
-                  review="APPROVED"
-                  echo "Re-approved."
+                  # `gh pr review --approve` can exit 0 even when the PAT
+                  # identity does not satisfy the branch ruleset's CODEOWNER
+                  # requirement — in that case GitHub records the review but
+                  # the authoritative `reviewDecision` stays `REVIEW_REQUIRED`
+                  # and the PR cannot auto-merge. Re-query the decision after
+                  # the post; only treat the approval as effective when
+                  # GitHub agrees. A REVIEW_REQUIRED result after a 0-exit
+                  # approval is the canonical sign of a non-CODEOWNER PAT;
+                  # surface it with a `::warning::` pointing at the token
+                  # config so maintainers don't chase symptoms downstream.
+                  local post_approve_decision
+                  if ! post_approve_decision=$(gh pr view "$pr" --json reviewDecision --jq '.reviewDecision'); then
+                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision re-query failed; cannot confirm CODEOWNER satisfaction. Auto-merge may remain blocked; manual approval may still be required."
+                  elif [ "$post_approve_decision" = "APPROVED" ]; then
+                    review="APPROVED"
+                    echo "Re-approved."
+                  else
+                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision is '${post_approve_decision}' (need APPROVED). The DEPENDABOT_APPROVE_TOKEN_ACTIONS identity likely does not satisfy the branch ruleset's CODEOWNER requirement; auto-merge will remain blocked. Configure a token belonging to a code-owner."
+                  fi
                 else
                   echo "::warning::PR #${pr}: re-approve failed (likely a revoked or insufficiently-scoped DEPENDABOT_APPROVE_TOKEN_ACTIONS, or a non-CODEOWNER identity)."
                 fi

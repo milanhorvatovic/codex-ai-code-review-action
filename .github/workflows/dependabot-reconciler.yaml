@@ -302,12 +302,16 @@ jobs:
           #       so the caller has nothing to disable.
           #   2 — state-unknown: the `gh pr view` API call itself failed. We
           #       genuinely don't know whether auto-merge armed, so the caller
-          #       must perform best-effort cleanup (a `trust-boundary` /
-          #       `security-review-required` label that landed between
-          #       gate_security_review and `gh pr merge --auto` could have
-          #       triggered the reactive disable-auto-merge job on the
-          #       `labeled` event before the arm completed — leaving nothing
-          #       else to disable auto-merge if the arm did in fact take).
+          #       must perform best-effort cleanup. Even though the arm path
+          #       runs TWO `gate_security_review` calls before the merge (top-
+          #       of-block + immediate pre-merge), a `trust-boundary` /
+          #       `security-review-required` label could still land in the
+          #       inter-command gap between the second gate and the merge
+          #       itself; if it did, the reactive
+          #       `disable-auto-merge-on-security-review` job in
+          #       dependabot-auto-merge.yaml may have fired on the `labeled`
+          #       event before the arm completed — leaving nothing else to
+          #       disable auto-merge if the arm did in fact take.
           verify_arm_or_terminal() {
             local pr=$1 state_json pr_state has_auto
             if ! state_json=$(gh pr view "$pr" --json state,autoMergeRequest); then
@@ -438,14 +442,25 @@ jobs:
           # transition discovered after `update-branch` can re-enter the same
           # logic instead of waiting for the next reconciler tick.
           #
-          # The marker lookup uses server-side jq with `--arg` so the literal
-          # HTML-comment characters in $RECREATE_MARKER never participate in
-          # shell or jq quoting. The comments payload is captured into a bash
-          # variable so the gh fetch failure can be detected separately from a
-          # successful empty-match result; the variable is then fed to jq's
-          # stdin (rather than walked with `grep`), so the marker test uses
-          # jq's JSON-aware string semantics on the parsed structure instead
-          # of relying on `grep -qF` over a flattened string.
+          # The marker lookup has three properties:
+          #   1. Server-side jq with `--arg` so the literal HTML-comment
+          #      characters in $RECREATE_MARKER never participate in shell
+          #      or jq quoting.
+          #   2. The comments payload is captured into a bash variable so
+          #      the gh fetch failure can be detected separately from a
+          #      successful empty-match result; the variable is then fed to
+          #      jq's stdin (rather than walked with `grep`), so the marker
+          #      test uses jq's JSON-aware string semantics on the parsed
+          #      structure instead of relying on `grep -qF` over a flattened
+          #      string.
+          #   3. The match is restricted to comments authored by
+          #      `github-actions[bot]` (the identity this workflow posts
+          #      under, via the default GH_TOKEN). Without that author
+          #      filter, an arbitrary commenter on a public PR could pre-
+          #      seed the marker into their own comment body and suppress
+          #      this workflow's only recreate-nudge for a real DIRTY
+          #      Dependabot PR. The author check is load-bearing for the
+          #      duplicate-suppression guarantee.
           handle_dirty() {
             local pr=$1 comments_json
             echo "DIRTY (real conflict)."
@@ -739,25 +754,35 @@ jobs:
                 had_critical_error=1
                 return 0
               fi
-              # Post-arm security-review re-check. Mirrors the `arm_auto_merge`
-              # helper in dependabot-auto-merge.yaml: between `gate_security_review`
-              # above and the `gh pr merge --auto` call we made several gh API
-              # calls (commit fetch, semver-major grep, exclude-list grep), giving
-              # a maintainer a multi-second window to apply `trust-boundary` or
-              # `security-review-required`. If that label landed before the arm,
-              # the reactive `disable-auto-merge-on-security-review` job in
-              # dependabot-auto-merge.yaml may have already fired on the `labeled`
-              # event before auto-merge was actually armed — meaning nothing else
-              # will disable auto-merge for us. Re-query the label state and
-              # defensively disable auto-merge on `true` or `unknown`.
-              # If the defensive `--disable-auto` itself fails, the PR remains
-              # armed for auto-merge despite the policy requiring manual review
-              # — a silent policy bypass. Mirror the `arm_auto_merge` helper in
-              # dependabot-auto-merge.yaml: that workflow `return 1`s in this
-              # situation so the job fails loudly. Per-PR isolation means we
-              # can't `exit 1` here without stranding the remaining PRs, so we
-              # set a sticky `had_critical_error` flag that the outer `for pr`
-              # loop reads to fail the run after every PR has been processed.
+              # Post-arm security-review re-check. The arm path has two
+              # races against a maintainer applying `trust-boundary` /
+              # `security-review-required` — this block handles the second:
+              #   - Pre-merge race (label applied between the top-of-block
+              #     `gate_security_review` and the merge call): closed by
+              #     the immediate-pre-merge `gate_security_review` added
+              #     just above this section. If the label landed before the
+              #     merge fired, that gate refuses and we never reach here.
+              #   - Post-enable async race (label applied after
+              #     `gh pr merge --auto` enabled auto-merge but before the
+              #     async merge actually completes): the arm has taken,
+              #     `--auto` is now armed on a PR the policy says must be
+              #     manual, and the reactive
+              #     `disable-auto-merge-on-security-review` job in
+              #     dependabot-auto-merge.yaml may have already fired on
+              #     the `labeled` event before our arm completed (so it has
+              #     nothing left to revoke). This block is what catches
+              #     that case: re-query the label state and defensively
+              #     disable auto-merge on `true` or `unknown`.
+              # If the defensive `--disable-auto` itself fails, the PR
+              # remains armed for auto-merge despite the policy requiring
+              # manual review — a silent policy bypass. Mirror the
+              # `arm_auto_merge` helper in dependabot-auto-merge.yaml:
+              # that workflow `return 1`s in this situation so the job
+              # fails loudly. Per-PR isolation means we can't `exit 1`
+              # here without stranding the remaining PRs, so we set a
+              # sticky `had_critical_error` flag that the outer `for pr`
+              # loop reads to fail the run after every PR has been
+              # processed.
               case "$(security_review_state "$pr")" in
                 true)
                   echo "::error::PR #${pr}: security-review label landed during the arm window; reverting auto-merge."

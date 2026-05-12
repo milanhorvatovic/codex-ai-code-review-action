@@ -94,17 +94,36 @@ concurrency:
 
 jobs:
   reconcile:
-    # No job-level actor/event gate: the reconciler runs on every trigger,
-    # including every completed run of the auto-merge workflow (regardless of
-    # which actor caused it — `dependabot[bot]`, `github-actions[bot]` from a
-    # GITHUB_TOKEN-driven synchronize, or a PAT owner from a
-    # `DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS`-driven update-branch). A
-    # narrower actor predicate would skip the PAT-authenticated case and
-    # defeat the reactive cascade the `workflow_run` trigger exists to
-    # enable. The in-script `gh pr list --app dependabot` filter immediately
-    # below is the authoritative identity check; on a workflow_run fired by a
-    # non-Dependabot PR event it returns an empty list and the job exits 0
-    # within seconds.
+    # `workflow_run` fires for *every* completed run of the auto-merge workflow,
+    # which is itself triggered by `pull_request` events on every PR opened
+    # against the repo (its jobs short-circuit for non-Dependabot PRs but the
+    # workflow itself still runs to completion). Without a gate, every random
+    # PR opening would trigger this reconciler with `contents: write`,
+    # `issues: write`, and `pull-requests: write` and access to Actions
+    # secrets (including the configured PATs) — a needless privilege-
+    # escalation surface and DoS vector.
+    #
+    # Gate on the upstream run's `head_branch` rather than its `actor.login`:
+    # Dependabot opens PRs on branches that always start with `dependabot/`
+    # (e.g. `dependabot/github_actions/main/...`, `dependabot/npm_and_yarn/...`),
+    # and the branch name is stable across the synchronize chain — a
+    # reconciler-triggered `gh pr update-branch` produces a new merge commit
+    # on the same `dependabot/...` head, so the gate still passes for PAT-
+    # authenticated cascades. The narrower actor gates explored in earlier
+    # rounds (`dependabot[bot]` only, then `dependabot[bot]`/`github-actions[bot]`)
+    # would skip the PAT-cascade case; this branch-name predicate covers it.
+    # For non-`workflow_run` triggers (`push: main`, `schedule`,
+    # `workflow_dispatch`) the predicate short-circuits to true via the
+    # `event_name != 'workflow_run'` clause.
+    #
+    # In-script defense in depth: the `gh pr list --app dependabot` +
+    # `.author.login == "dependabot[bot]"` filter further below remains the
+    # authoritative identity gate. A maintainer-created branch coincidentally
+    # named `dependabot/...` would pass this `if:` but immediately exit 0 at
+    # the in-script filter because no Dependabot-authored PRs exist on it.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
     runs-on: ubuntu-latest
     permissions:
       # `gh pr update-branch` and `gh pr merge --auto` need write on contents

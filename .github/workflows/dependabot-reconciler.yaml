@@ -560,19 +560,20 @@ jobs:
               if ! check_dependency_gates "$pr" "arm auto-merge"; then
                 return 0
               fi
-              if ! gh pr merge --auto --squash "$pr"; then
-                # Failure here is the same persistent-config class the verify
-                # path treats as critical (bot lacks merge permission, repo
-                # `Allow auto-merge` setting off, etc.). A warning-only response
-                # lets every eligible Dependabot PR stay stranded indefinitely
-                # while scheduled reconciler runs report green, defeating the
-                # workflow's whole purpose of surfacing stuck states. Set the
-                # sticky `had_critical_error` flag so the loop-end check fails
-                # the run; per-PR isolation is preserved by returning 0.
-                echo "::error::PR #${pr}: arm auto-merge failed (likely the github-actions bot lacks merge permission or the repo's 'Allow auto-merge' setting is off). Investigate immediately."
-                had_critical_error=1
-                return 0
-              fi
+              # Tolerate a non-zero exit from `gh pr merge --auto --squash`
+              # here: the failure is just as likely to be a benign race
+              # against the existing `dependabot-auto-merge.yaml` workflow
+              # (which can have merged the PR or armed auto-merge between
+              # our last `gh pr view` above and this call — "PR already
+              # merged" / "auto-merge already enabled" both return non-zero
+              # from gh) as it is a persistent configuration failure. The
+              # immediate exit code can't distinguish the two; `verify_arm_or_terminal`
+              # below queries the authoritative post-arm state and decides:
+              # MERGED/CLOSED or OPEN-with-autoMergeRequest is success; OPEN
+              # with autoMergeRequest=null is the silent enable failure that
+              # routes to `had_critical_error`. Mirrors the canonical pattern
+              # in `dependabot-auto-merge.yaml`'s `arm_auto_merge` helper.
+              gh pr merge --auto --squash "$pr" 2>&1 || true
               # `gh pr merge --auto` can exit 0 without actually enabling
               # auto-merge — the silent-enable-failure case this workflow
               # exists to backstop. Verify the PR state genuinely reflects the
@@ -703,14 +704,16 @@ jobs:
           # doing its job. Each PR's handler sets `had_critical_error=1` on
           # any of these conditions:
           #
-          #   1. `gh pr merge --auto --squash` itself returned non-zero. The
-          #      message text suggests bot-permission or repo-setting issues —
-          #      persistent classes that strand every eligible Dependabot PR.
-          #   2. `verify_arm_or_terminal` returned `1` (definitively-not-armed:
+          #   1. `verify_arm_or_terminal` returned `1` (definitively-not-armed:
           #      gh exited cleanly but the PR is OPEN with `autoMergeRequest`
           #      still null) or `2` (state-unknown: post-arm `gh pr view` API
           #      call itself failed and we can't confirm whether arm took).
-          #   3. A failed defensive `gh pr merge --disable-auto` after a
+          #      This is the canonical "silent enable failure" signal — the
+          #      reconciler tolerates a non-zero exit from `gh pr merge --auto`
+          #      itself (it can be a benign race against the existing auto-
+          #      merge workflow merging or arming the same PR concurrently)
+          #      and lets the authoritative post-arm state read decide.
+          #   2. A failed defensive `gh pr merge --disable-auto` after a
           #      security-review label landed during the arm window — the
           #      original policy-bypass case the flag was introduced for.
           #
@@ -726,6 +729,6 @@ jobs:
           done
 
           if [ "$had_critical_error" = "1" ]; then
-            echo "::error::At least one PR encountered a critical reconciler failure (arm-call failure, silent or unverifiable auto-merge enable, or failed defensive disable on a security-review PR). Failing the run so the issue surfaces; see per-PR ::error:: lines above for the specific cause."
+            echo "::error::At least one PR encountered a critical reconciler failure (silent or unverifiable auto-merge enable, or failed defensive disable on a security-review PR). Failing the run so the issue surfaces; see per-PR ::error:: lines above for the specific cause."
             exit 1
           fi

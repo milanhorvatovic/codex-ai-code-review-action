@@ -65,56 +65,61 @@ jobs:
             echo "dist/ is already up to date; nothing to commit."
           fi
 
-      - name: Validate rebuild-dist configuration
+      # Mint a short-lived token from the `oss-automation-bot` GitHub App.
+      # Used to authenticate the rebuild-dist push and to attribute the
+      # commit to the App's bot user. Replaces the legacy stack of three
+      # Dependabot-scoped configuration items (`DEPENDABOT_REBUILD_TOKEN`,
+      # `DEPENDABOT_GPG_PRIVATE_KEY`, `DEPENDABOT_GIT_COMMITTER_NAME`,
+      # `DEPENDABOT_GIT_COMMITTER_EMAIL`) and the GPG import step. The
+      # GPG dance was historically justified as "required to satisfy
+      # main's required_signatures rule" but the repository's branch
+      # ruleset (verified against the live `Default branch` ruleset) does
+      # not include `required_signatures`, so the prior commit signatures
+      # were gratuitous; the rebuild-dist commits now land as Unverified
+      # and no ruleset rejects them. `create-github-app-token` fails the
+      # job if `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY`
+      # is missing, which subsumes the prior `Validate rebuild-dist
+      # configuration` step's role. The private key must exist in BOTH
+      # the Actions and Dependabot secrets stores — Dependabot-triggered
+      # workflows cannot read Actions secrets and vice versa, the same
+      # dual-store pattern documented for `CODEOWNER_APPROVER_TOKEN` in
+      # `dependabot-reconciler.yaml`.
+      - name: Mint oss-automation-bot token for dist push
         if: steps.dist.outputs.changed == 'true'
-        env:
-          REBUILD_TOKEN: ${{ secrets.DEPENDABOT_REBUILD_TOKEN }}
-          GPG_PRIVATE_KEY: ${{ secrets.DEPENDABOT_GPG_PRIVATE_KEY }}
-          COMMITTER_NAME: ${{ vars.DEPENDABOT_GIT_COMMITTER_NAME }}
-          COMMITTER_EMAIL: ${{ vars.DEPENDABOT_GIT_COMMITTER_EMAIL }}
-        run: |
-          missing=0
-          if [ -z "$REBUILD_TOKEN" ]; then
-            echo "::error::Dependabot secret DEPENDABOT_REBUILD_TOKEN is missing — required to push the rebuilt dist/ back to the PR. Create a fine-grained PAT scoped to this repo (Contents: read/write) and store it as DEPENDABOT_REBUILD_TOKEN under Settings → Secrets and variables → Dependabot."
-            missing=1
-          fi
-          if [ -z "$GPG_PRIVATE_KEY" ]; then
-            echo "::error::Dependabot secret DEPENDABOT_GPG_PRIVATE_KEY is missing — required to sign the rebuilt dist/ commit so it satisfies main's required_signatures rule. Export an armored sign-only GPG subkey ('gpg --armor --export-secret-subkeys <subkey-id>!') and store it as DEPENDABOT_GPG_PRIVATE_KEY under Settings → Secrets and variables → Dependabot."
-            missing=1
-          fi
-          if [ -z "$COMMITTER_NAME" ]; then
-            echo "::error::Repo variable DEPENDABOT_GIT_COMMITTER_NAME is missing — required as the committer name for the signed rebuild-dist commit. Set it under Settings → Secrets and variables → Actions → Variables."
-            missing=1
-          fi
-          if [ -z "$COMMITTER_EMAIL" ]; then
-            echo "::error::Repo variable DEPENDABOT_GIT_COMMITTER_EMAIL is missing — required as the committer email for the signed rebuild-dist commit. It must match a UID on the imported GPG key and a verified email on the GitHub account that owns the public key. Set it under Settings → Secrets and variables → Actions → Variables."
-            missing=1
-          fi
-          if [ "$missing" -ne 0 ]; then
-            exit 1
-          fi
-
-      - name: Import GPG key
-        if: steps.dist.outputs.changed == 'true'
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
-          gpg_private_key: ${{ secrets.DEPENDABOT_GPG_PRIVATE_KEY }}
-          git_user_signingkey: true
-          git_commit_gpgsign: true
-          git_config_global: true
-          git_committer_name: ${{ vars.DEPENDABOT_GIT_COMMITTER_NAME }}
-          git_committer_email: ${{ vars.DEPENDABOT_GIT_COMMITTER_EMAIL }}
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
 
-      - name: Commit and push dist
+      - name: Commit and push dist as oss-automation-bot
         if: steps.dist.outputs.changed == 'true'
         env:
-          REBUILD_TOKEN: ${{ secrets.DEPENDABOT_REBUILD_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
+          # Resolve the App's bot user record so the commit's committer
+          # fields point at the bot's profile. The `<id>+<slug>[bot]@users.noreply.github.com`
+          # form is GitHub's canonical no-reply pattern for bot users —
+          # the numeric prefix is what links the commit to the bot's
+          # profile page in the GitHub UI; without it the commit shows
+          # the right name but isn't clickable.
+          app_user_id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${app_user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
           git add dist/
           git commit -m "chore: rebuild dist after dependency update"
-          git push "https://x-access-token:${REBUILD_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
+          # Push with the App-minted token. The resulting `synchronize`
+          # event is attributed to the App identity (not GITHUB_TOKEN),
+          # so downstream required-check workflows fire on the new head
+          # — matching the reconciler's `gh pr update-branch` pattern
+          # and avoiding the GITHUB_TOKEN anti-loop suppression that
+          # would otherwise leave stale checks blocking auto-merge
+          # under `strict_required_status_checks_policy: true`.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
 
   auto-merge:
     # Skip on label events — auto-merge is set once at open/synchronize time. If a maintainer later

@@ -117,7 +117,18 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Walk the diff under dist/ and split into additions/deletions.
+          # Stage everything under dist/ first. The detect step above uses
+          # `git status --porcelain dist/`, which reports untracked entries
+          # (`??`) — a brand-new ncc chunk or a fresh `licenses.txt` flips
+          # `changed=true`. A plain `git diff HEAD -- dist/` does NOT list
+          # untracked files, so without staging those new files would
+          # silently drop out of `fileChanges` and the mutation would land
+          # an incomplete dist/ (or reject the call outright). `git add -A
+          # dist/` lifts untracked additions into the index so the cached
+          # diff classifies them as `A`.
+          git add -A dist/
+
+          # Walk the staged diff under dist/ and split into additions/deletions.
           # `--no-renames` keeps the status set to {A,M,D} (rename status
           # `R` would produce a three-column record requiring different
           # parsing); `-z` makes records null-terminated so paths with
@@ -149,7 +160,7 @@ jobs:
                 exit 1
                 ;;
             esac
-          done < <(git diff --name-status --no-renames -z HEAD -- dist/)
+          done < <(git diff --cached --name-status --no-renames -z -- dist/)
 
           # Single GraphQL mutation. The App-installation token
           # authenticates the call so GitHub signs the resulting commit

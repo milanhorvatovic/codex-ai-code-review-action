@@ -125,6 +125,16 @@ jobs:
       github.event_name != 'workflow_run' ||
       startsWith(github.event.workflow_run.head_branch, 'dependabot/')
     runs-on: ubuntu-latest
+    # Cap the reconciler at 30 minutes. The per-PR work is short
+    # (`gh pr view`, `gh pr update-branch`, `gh pr merge --auto`, plus an
+    # at-most-30 s mergeable poll on BEHIND PRs), but a hung gh API call or
+    # an unbounded backlog could otherwise tie up the singleton concurrency
+    # slot for GitHub's default 6 hours. 30 min matches the cap on
+    # `dependabot-auto-merge.yaml`'s `auto-merge` job and is well above the
+    # observed steady-state runtime (~seconds per PR, single-digit PRs per
+    # tick), so it surfaces a real hang as a failure without flaking on
+    # normal runs.
+    timeout-minutes: 30
     permissions:
       # `gh pr update-branch` and `gh pr merge --auto` need write on contents
       # and pull-requests. `gh pr comment` posts an issue comment on the PR

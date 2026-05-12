@@ -166,8 +166,13 @@ jobs:
           #               and could (mis)include the PR in a major
           #               release. The auto-correction is limited to the
           #               KNOWN static-default mismatch; anything else is
-          #               left for `verify-pr-release-label` to flag if
-          #               the label disagrees with policy.
+          #               preserved as grouped intent or a maintainer
+          #               override. (No other workflow cross-checks the
+          #               label against Dependabot's effective update-
+          #               type — `verify-pr-release-label` only enforces
+          #               "exactly one canonical `release: *` label",
+          #               which a canonical-but-policy-disagreeing label
+          #               still satisfies.)
           #   - >1 labels → leave for `verify-pr-release-label` to flag
           #     and the maintainer to triage. The workflow shouldn't
           #     second-guess a manual override.

@@ -102,7 +102,7 @@ This repository runs the action against its own pull requests via [`.github/work
 
 ## Release automation identity
 
-Release automation is performed by a dedicated GitHub App installed only on this repository. The App identity is `codex-review-action-release-bot[bot]` in audit logs and PR authorship.
+Release automation is performed by a dedicated GitHub App installed only on this repository. The App identity is `oss-release-bot[bot]` in audit logs and PR authorship.
 
 ### Permission scope
 
@@ -119,7 +119,7 @@ The App has no organization permissions, no user permissions, no webhook, and no
 
 App credentials are stored at the repo level (Settings → Secrets and variables → Actions):
 
-- `RELEASE_APP_ID` (variable) — the App's numeric ID. Not a secret; stored as a repo variable so workflows can reference it via `vars.RELEASE_APP_ID`.
+- `RELEASE_CLIENT_ID` (variable) — the App's OAuth Client ID. Not a secret; stored as a repo variable so workflows can reference it via `vars.RELEASE_CLIENT_ID` and pass it as the `client-id` input to `actions/create-github-app-token`.
 - `RELEASE_APP_PRIVATE_KEY` (secret) — the App's signing key. Release-automation workflows are expected to feed this into a token-minting Action (e.g. `actions/create-github-app-token`) to obtain short-lived installation tokens at runtime.
 
 GitHub App installation tokens expire automatically (one-hour default) and are scoped to the installation rather than to a specific workflow run, so a leaked token remains usable until expiry or explicit revocation. Release-automation workflows are expected to mint a token at job start and revoke it at job end (the default post-step behavior of `actions/create-github-app-token`); the App identity itself does not enforce that. Maintainers rotate the private key by generating a new one on the App settings page and replacing the secret value; old keys remain valid until manually revoked.

@@ -1,0 +1,9 @@
+.github/workflows/dependabot-auto-merge.yaml
+  ai_agent 127-130,133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "cd392b5462df8004a49bac5554c046e0b8afb31d",
+  "prompts": {}
+}

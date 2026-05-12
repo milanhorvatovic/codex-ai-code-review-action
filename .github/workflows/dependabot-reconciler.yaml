@@ -520,7 +520,16 @@ jobs:
                 return 0
               fi
               if ! gh pr merge --auto --squash "$pr"; then
-                echo "::warning::PR #${pr}: arm auto-merge failed (likely the github-actions bot lacks merge permission or the repo's 'Allow auto-merge' setting is off)."
+                # Failure here is the same persistent-config class the verify
+                # path treats as critical (bot lacks merge permission, repo
+                # `Allow auto-merge` setting off, etc.). A warning-only response
+                # lets every eligible Dependabot PR stay stranded indefinitely
+                # while scheduled reconciler runs report green, defeating the
+                # workflow's whole purpose of surfacing stuck states. Set the
+                # sticky `had_critical_error` flag so the loop-end check fails
+                # the run; per-PR isolation is preserved by returning 0.
+                echo "::error::PR #${pr}: arm auto-merge failed (likely the github-actions bot lacks merge permission or the repo's 'Allow auto-merge' setting is off). Investigate immediately."
+                had_critical_error=1
                 return 0
               fi
               # `gh pr merge --auto` can exit 0 without actually enabling

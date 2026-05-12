@@ -1,22 +1,39 @@
 name: Dependabot Release Label
 
-# Backstop that adds the `release: <level>` label to Dependabot PRs that did
-# not inherit one from `.github/dependabot.yaml`. Configured-group PRs (npm,
-# github-actions) pick up `release: patch` from the labels list there, but
-# Dependabot security-update PRs (the built-in `npm_and_yarn` group, not a
-# group we configure) inconsistently apply those labels — so the required
-# `verify-pr-release-label` check fails and auto-merge cannot complete.
+# Reconciles the `release: <level>` label on every Dependabot PR to match the
+# effective update-type derived from Dependabot's metadata. Two distinct
+# scenarios this addresses:
 #
-# Mirrors the effective-update-type derivation from `dependabot-auto-merge.yaml`
-# so SHA→SHA same-version dogfood self-reference bumps (which `fetch-metadata`
-# conservatively reports as semver-major) classify as patch here too — keeping
-# the label in lockstep with the merge policy. A pre-add label query plus a
-# post-add recheck bracket `gh pr edit`: the pre-add query skips when a label
-# is already present, the post-add recheck rolls back the workflow-applied
-# label if a maintainer's manual `release: *` raced into the check-then-act
-# window, leaving the manual override intact and a single release label on the
-# PR. (A maintainer applying the *same* label we'd compute is a set-semantics
-# no-op — the PR ends up with one label and no rollback fires.)
+#   1. Backstop for absent labels. Dependabot security-update PRs (the
+#      built-in `npm_and_yarn` group, not a group configured in our
+#      `.github/dependabot.yaml`) inconsistently apply the static label
+#      list, so the required `verify-pr-release-label` check would
+#      otherwise fail and auto-merge cannot complete.
+#
+#   2. Corrector for the standalone-semver-major case. Our
+#      `.github/dependabot.yaml` applies `release: patch` statically to
+#      every PR from the npm and github-actions ecosystems, but since
+#      those groups now carry `update-types: [minor, patch]`, semver-major
+#      bumps split out of the group and arrive as standalone Dependabot
+#      PRs. A standalone semver-major PR inherits `release: patch` from
+#      the static config, which would mis-classify it for the release-prep
+#      automation. This workflow recomputes the effective update-type and
+#      REPLACES the static `release: patch` with `release: major` when the
+#      two disagree. (Patch and minor bumps stay through the fast path:
+#      the static label is already correct.)
+#
+# Effective-update-type derivation mirrors `dependabot-auto-merge.yaml` so
+# SHA→SHA same-version dogfood self-reference bumps (which `fetch-metadata`
+# conservatively reports as semver-major) classify as patch here too —
+# keeping the label in lockstep with the merge policy.
+#
+# Race protection: the edit step combines `--remove-label` and `--add-label`
+# in one `gh pr edit` call where applicable, and follows with a post-edit
+# recheck that rolls back the workflow-applied label if a maintainer's
+# manual `release: *` raced into the check-then-act window. The rollback
+# only ever removes the desired label this workflow just applied, never
+# another, so a maintainer applying the *same* label we'd compute is a
+# set-semantics no-op and no rollback fires.
 
 on:
   pull_request:
@@ -77,7 +94,7 @@ jobs:
           ' <<<"$UPDATED_JSON")
           echo "update-type=$effective" >> "$GITHUB_OUTPUT"
 
-      - name: Add release label if missing
+      - name: Reconcile release label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -85,34 +102,66 @@ jobs:
         run: |
           set -euo pipefail
 
-          count_release_labels() {
+          # Map the effective update-type to the desired release label.
+          case "$UPDATE_TYPE" in
+            version-update:semver-major) desired="release: major" ;;
+            version-update:semver-minor) desired="release: minor" ;;
+            *)                            desired="release: patch" ;;
+          esac
+
+          # Inventory the current release labels on the PR. Sorted JSON array
+          # so `jq -r '.[0]'` is deterministic when exactly one is present.
+          list_release_labels() {
             gh pr view "$PR_URL" --json labels \
-              --jq '[.labels[].name | select(startswith("release: "))] | length'
+              --jq '[.labels[].name | select(startswith("release: "))] | sort'
           }
 
-          if [ "$(count_release_labels)" != "0" ]; then
-            echo "Release label already present; nothing to do."
+          current_json="$(list_release_labels)"
+          current_count=$(jq 'length' <<<"$current_json")
+
+          # Four cases to handle:
+          #   - 0 release labels  → add the desired one (security-update
+          #     backstop case: Dependabot didn't apply the static label).
+          #   - 1 label matching  → no-op (fast path: the static label from
+          #     dependabot.yaml is already correct, which is the common case
+          #     for grouped patch/minor bumps).
+          #   - 1 label mismatch  → replace it with the desired one
+          #     (standalone-semver-major correction case: the static
+          #     `release: patch` from dependabot.yaml doesn't match the
+          #     effective update-type, typically because a semver-major
+          #     bump split out of its group as a standalone PR).
+          #   - >1 labels         → maintainer applied an additional release
+          #     label manually; leave the conflict for `verify-pr-release-label`
+          #     to flag and the maintainer to triage. The workflow shouldn't
+          #     second-guess a manual override.
+          if [ "$current_count" = "0" ]; then
+            echo "No release label present; adding '$desired'."
+            gh pr edit "$PR_URL" --add-label "$desired"
+          elif [ "$current_count" = "1" ]; then
+            current=$(jq -r '.[0]' <<<"$current_json")
+            if [ "$current" = "$desired" ]; then
+              echo "Release label '$desired' already correct; nothing to do."
+              exit 0
+            fi
+            echo "Replacing '$current' with '$desired' (effective update-type: $UPDATE_TYPE)."
+            gh pr edit "$PR_URL" --add-label "$desired" --remove-label "$current"
+          else
+            echo "::warning::PR has multiple release labels ($(jq -c '.' <<<"$current_json")); leaving as-is for manual triage."
             exit 0
           fi
 
-          case "$UPDATE_TYPE" in
-            version-update:semver-major) label="release: major" ;;
-            version-update:semver-minor) label="release: minor" ;;
-            *)                            label="release: patch" ;;
-          esac
-
-          gh pr edit "$PR_URL" --add-label "$label"
-
-          # Post-add recheck closes the check-then-act window left by the
-          # pre-add query above. If a maintainer applied a different
-          # `release: *` label between that query and `gh pr edit --add-label`,
+          # Post-edit recheck closes the check-then-act window left by the
+          # state query above. If a maintainer applied a different
+          # `release: *` label between that query and the `gh pr edit` call,
           # the PR now carries two release labels and `verify-pr-release-label`
-          # would reject it. Roll back the label this workflow added so the
-          # manual override wins. We only ever remove `$label` (the one we
-          # just added) — never another label — so a concurrent automation
-          # that applied the *same* label produces a single label by set
-          # semantics, the count stays at 1, and no rollback fires.
-          if [ "$(count_release_labels)" -gt 1 ]; then
-            echo "::warning::A different release label appears to have been applied during the add window; removing the workflow-applied '$label' so the manual override wins."
-            gh pr edit "$PR_URL" --remove-label "$label"
+          # would reject it. Roll back the label this workflow just applied
+          # so the manual override wins. We only ever remove `$desired`
+          # (the one we just added) — never another label — so a concurrent
+          # automation that applied the *same* label produces a single label
+          # by set semantics, the count stays at 1, and no rollback fires.
+          post_count=$(gh pr view "$PR_URL" --json labels \
+            --jq '[.labels[].name | select(startswith("release: "))] | length')
+          if [ "$post_count" -gt 1 ]; then
+            echo "::warning::A different release label appears to have been applied during the edit window; removing the workflow-applied '$desired' so the manual override wins."
+            gh pr edit "$PR_URL" --remove-label "$desired"
           fi

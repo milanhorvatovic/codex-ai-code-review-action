@@ -23,6 +23,11 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+      # `release: patch` is the fast-path default for grouped patch/minor
+      # bumps; for standalone semver-major PRs (which split out of the group
+      # because of `update-types: [minor, patch]` above), the
+      # `dependabot-release-label.yaml` workflow replaces it with
+      # `release: major` based on the effective update-type.
       - "release: patch"
     schedule:
       day: "monday"
@@ -48,6 +53,11 @@ updates:
     labels:
       - "dependencies"
       - "npm"
+      # `release: patch` is the fast-path default for grouped patch/minor
+      # bumps; for standalone semver-major PRs (which split out of the group
+      # because of `update-types: [minor, patch]` above), the
+      # `dependabot-release-label.yaml` workflow replaces it with
+      # `release: major` based on the effective update-type.
       - "release: patch"
     schedule:
       day: "monday"

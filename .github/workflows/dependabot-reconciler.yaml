@@ -94,34 +94,17 @@ concurrency:
 
 jobs:
   reconcile:
-    # `workflow_run` fires for *every* completed run of the auto-merge workflow,
-    # including runs whose jobs were skipped by their own `if:` guards (e.g., a
-    # non-Dependabot PR opens, the auto-merge workflow triggers, all its jobs
-    # short-circuit, the workflow nevertheless "completes" — and our reconciler
-    # would fire on top of that). Skip those: only run when the upstream run
-    # was actually associated with a Dependabot-authored PR. For the other
-    # triggers (`push: main`, `schedule`, `workflow_dispatch`) the gate is a
-    # no-op so the reconciler still runs as expected.
-    #
-    # `actor.login` accepts two bot identities:
-    #   - `dependabot[bot]`: the upstream run was triggered by a Dependabot
-    #     event (opened/reopened/synchronize-from-Dependabot).
-    #   - `github-actions[bot]`: the upstream run was triggered by a
-    #     `synchronize` event that this reconciler caused via
-    #     `gh pr update-branch` (the GITHUB_TOKEN that wrote the merge commit
-    #     surfaces as `github-actions[bot]` on the resulting event). That is
-    #     the canonical reactive case the workflow_run trigger exists for —
-    #     when the upstream auto-merge then completes the merge with
-    #     GITHUB_TOKEN, the `push: main` event is suppressed and this
-    #     workflow_run is the only way to react before the hourly cron.
-    # Other actors (random users opening non-Dependabot PRs, etc.) skip; the
-    # in-script `gh pr list --app dependabot` filter is the authoritative
-    # identity gate, so allowing `github-actions[bot]` here is a cost-saving
-    # hint, not a security boundary.
-    if: >-
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.actor.login == 'dependabot[bot]' ||
-      github.event.workflow_run.actor.login == 'github-actions[bot]'
+    # No job-level actor/event gate: the reconciler runs on every trigger,
+    # including every completed run of the auto-merge workflow (regardless of
+    # which actor caused it — `dependabot[bot]`, `github-actions[bot]` from a
+    # GITHUB_TOKEN-driven synchronize, or a PAT owner from a
+    # `DEPENDABOT_UPDATE_BRANCH_TOKEN_ACTIONS`-driven update-branch). A
+    # narrower actor predicate would skip the PAT-authenticated case and
+    # defeat the reactive cascade the `workflow_run` trigger exists to
+    # enable. The in-script `gh pr list --app dependabot` filter immediately
+    # below is the authoritative identity check; on a workflow_run fired by a
+    # non-Dependabot PR event it returns an empty list and the job exits 0
+    # within seconds.
     runs-on: ubuntu-latest
     permissions:
       # `gh pr update-branch` and `gh pr merge --auto` need write on contents

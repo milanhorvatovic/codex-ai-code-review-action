@@ -619,6 +619,27 @@ jobs:
               if ! check_dependency_gates "$pr" "arm auto-merge"; then
                 return 0
               fi
+              # Re-check the security-review state IMMEDIATELY before the
+              # merge call. `gh pr merge --auto --squash` can perform a
+              # synchronous merge (not just enable auto-merge) when the PR
+              # already satisfies every branch protection rule at this
+              # instant, which is the common path for the reconciler's arm
+              # branch (we only get here on `mergeable=MERGEABLE` +
+              # `review=APPROVED`). Between the earlier `gate_security_review`
+              # at the top of this block and this point we did several gh
+              # API calls (commit metadata fetch, optional PR title fetch
+              # inside `check_dependency_gates`), giving a maintainer a
+              # multi-second window to apply `trust-boundary` /
+              # `security-review-required`. If that label landed before the
+              # merge happens, the post-arm cleanup further below cannot
+              # revoke an already-completed merge. This pre-merge re-check
+              # narrows the race to the inter-command latency of the next
+              # two gh calls, which is the tightest possible without
+              # promoting the label-presence policy to a required status
+              # check on the branch ruleset.
+              if ! gate_security_review "$pr" "arm auto-merge (pre-merge re-check)"; then
+                return 0
+              fi
               # Tolerate a non-zero exit from `gh pr merge --auto --squash`
               # here: the failure is just as likely to be a benign race
               # against the existing `dependabot-auto-merge.yaml` workflow

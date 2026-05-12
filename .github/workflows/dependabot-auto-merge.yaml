@@ -124,11 +124,13 @@ jobs:
           # spaces never break the split. dist/ paths don't contain
           # spaces today, but the safe form costs nothing and removes a
           # future foot-gun.
+          #
+          # `git diff -z --name-status` emits paired NUL-separated fields
+          # per record: `<status>\0<path>\0` (NOT a single tab-joined
+          # field). Read two paired NUL-terminated fields per iteration.
           additions='[]'
           deletions='[]'
-          while IFS=$'\t' read -r -d '' record; do
-            status="${record%%$'\t'*}"
-            path="${record#*$'\t'}"
+          while IFS= read -r -d '' status && IFS= read -r -d '' path; do
             case "$status" in
               A|M)
                 # createCommitOnBranch's `FileAddition.contents` is a

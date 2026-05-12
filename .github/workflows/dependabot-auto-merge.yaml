@@ -85,6 +85,14 @@ jobs:
       # workflows cannot read Actions secrets and vice versa, the same
       # dual-store pattern documented for `CODEOWNER_APPROVER_TOKEN` in
       # `dependabot-reconciler.yaml`.
+      #
+      # The token is narrowed to `contents: write` only. Omitting
+      # `permission-*` inputs would mint with the App installation's
+      # full permission set; this step's two consumers — `git push` to
+      # the PR branch and `GET /users/{username}` for the bot-user
+      # lookup (a public endpoint that requires no permission scope) —
+      # both work under contents-only, so the broader scopes are
+      # avoidable privilege expansion in a Dependabot-context job.
       - name: Mint oss-automation-bot token for dist push
         if: steps.dist.outputs.changed == 'true'
         id: app-token
@@ -92,6 +100,7 @@ jobs:
         with:
           app-id: ${{ vars.AUTOMATION_APP_ID }}
           private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
+          permission-contents: write
 
       - name: Commit and push dist as oss-automation-bot
         if: steps.dist.outputs.changed == 'true'

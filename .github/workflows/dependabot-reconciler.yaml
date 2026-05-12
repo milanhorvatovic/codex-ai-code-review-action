@@ -204,14 +204,14 @@ jobs:
       # `strict_required_status_checks_policy: true`.
       #
       # `release.yaml` uses the same `actions/create-github-app-token`
-      # minting shape against a DIFFERENT App (`codex-review-action-release-bot`,
-      # the Release Bot) — the cross-reference is to the pattern, not to
-      # the identity; this workflow consumes the Automation Bot per the
-      # two-App split documented in
-      # oss-automation/decisions/001-two-apps-release-and-automation.md.
-      # The `dependabot-auto-merge.yaml` rebuild-dist step migration to
-      # this same `oss-automation-bot` App identity is pending — see
-      # oss-automation/repos/codex-ai-code-review-action.md.
+      # minting shape against a different App (`codex-review-action-release-bot`,
+      # the Release Bot) — the cross-reference is to the pattern, not the
+      # identity. This workflow consumes the Automation Bot, which has a
+      # narrower blast radius than the Release Bot (the two-App split
+      # exists so a leak of the lower-risk identity doesn't force rotation
+      # of the higher-risk one). The `dependabot-auto-merge.yaml`
+      # rebuild-dist step is planned to migrate to this same Automation
+      # Bot identity in a follow-up.
       - name: Mint oss-automation-bot token for update-branch
         id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -223,15 +223,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          # Codeowner-approver PAT (per oss-automation/bots.md). One identity,
-          # held in both stores under the same name: Actions store consumed
-          # here, Dependabot store consumed by dependabot-auto-merge.yaml's
-          # auto-approval step. Workflows triggered by
+          # Codeowner-approver PAT. One identity, held in both stores under
+          # the same name: Actions store consumed here, Dependabot store
+          # consumed by `dependabot-auto-merge.yaml`'s auto-approval step.
+          # Workflows triggered by
           # `push`/`schedule`/`workflow_run`/`workflow_dispatch` cannot read
           # Dependabot secrets and vice versa, so the value lives in both
           # stores; the trigger context determines which one this reference
-          # resolves against. If unset, re-approve degrades to a warning and
-          # the PR waits for manual approval.
+          # resolves against. If unset, re-approve degrades to a warning
+          # and the PR waits for manual approval.
           APPROVE_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
           # App-minted token from the `oss-automation-bot` step above. The
           # `create-github-app-token` action fails the job if

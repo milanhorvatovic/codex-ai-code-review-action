@@ -65,56 +65,128 @@ jobs:
             echo "dist/ is already up to date; nothing to commit."
           fi
 
-      - name: Validate rebuild-dist configuration
+      # Mint a short-lived token from the `oss-automation-bot` GitHub App.
+      # Used to authenticate the GraphQL `createCommitOnBranch` mutation
+      # that lands the rebuilt dist/ on the PR branch. Replaces the legacy
+      # stack of four configuration items split across two stores — two
+      # Dependabot secrets (`DEPENDABOT_REBUILD_TOKEN`,
+      # `DEPENDABOT_GPG_PRIVATE_KEY`) and two Actions variables
+      # (`DEPENDABOT_GIT_COMMITTER_NAME`, `DEPENDABOT_GIT_COMMITTER_EMAIL`)
+      # — plus the GPG import step.
+      #
+      # Why GraphQL rather than plain `git push`: pushes from an
+      # App-installation token over HTTPS authenticate the push but do
+      # NOT sign the locally-created commit, so a `git push` path would
+      # land rebuild-dist commits as Unverified. `createCommitOnBranch`
+      # creates the commit server-side under the authenticated App
+      # identity; GitHub signs commits authored via this mutation on
+      # behalf of the App, so rebuild-dist commits stay Verified just
+      # like under the prior GPG flow — without any GPG key or
+      # committer-identity configuration to manage.
+      #
+      # `create-github-app-token` fails the job if
+      # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
+      # missing, which subsumes the prior `Validate rebuild-dist
+      # configuration` step's role. The private key must exist in BOTH
+      # the Actions and Dependabot secrets stores — Dependabot-triggered
+      # workflows cannot read Actions secrets and vice versa, the same
+      # dual-store pattern documented for `CODEOWNER_APPROVER_TOKEN` in
+      # `dependabot-reconciler.yaml`.
+      #
+      # The token is narrowed to `contents: write` only. Omitting
+      # `permission-*` inputs would mint with the App installation's
+      # full permission set; the sole consumer of this token is the
+      # `createCommitOnBranch` mutation, which requires `contents:
+      # write`, so broader scopes are avoidable privilege expansion in
+      # a Dependabot-context job.
+      - name: Mint oss-automation-bot token for dist push
         if: steps.dist.outputs.changed == 'true'
-        env:
-          REBUILD_TOKEN: ${{ secrets.DEPENDABOT_REBUILD_TOKEN }}
-          GPG_PRIVATE_KEY: ${{ secrets.DEPENDABOT_GPG_PRIVATE_KEY }}
-          COMMITTER_NAME: ${{ vars.DEPENDABOT_GIT_COMMITTER_NAME }}
-          COMMITTER_EMAIL: ${{ vars.DEPENDABOT_GIT_COMMITTER_EMAIL }}
-        run: |
-          missing=0
-          if [ -z "$REBUILD_TOKEN" ]; then
-            echo "::error::Dependabot secret DEPENDABOT_REBUILD_TOKEN is missing — required to push the rebuilt dist/ back to the PR. Create a fine-grained PAT scoped to this repo (Contents: read/write) and store it as DEPENDABOT_REBUILD_TOKEN under Settings → Secrets and variables → Dependabot."
-            missing=1
-          fi
-          if [ -z "$GPG_PRIVATE_KEY" ]; then
-            echo "::error::Dependabot secret DEPENDABOT_GPG_PRIVATE_KEY is missing — required to sign the rebuilt dist/ commit so it satisfies main's required_signatures rule. Export an armored sign-only GPG subkey ('gpg --armor --export-secret-subkeys <subkey-id>!') and store it as DEPENDABOT_GPG_PRIVATE_KEY under Settings → Secrets and variables → Dependabot."
-            missing=1
-          fi
-          if [ -z "$COMMITTER_NAME" ]; then
-            echo "::error::Repo variable DEPENDABOT_GIT_COMMITTER_NAME is missing — required as the committer name for the signed rebuild-dist commit. Set it under Settings → Secrets and variables → Actions → Variables."
-            missing=1
-          fi
-          if [ -z "$COMMITTER_EMAIL" ]; then
-            echo "::error::Repo variable DEPENDABOT_GIT_COMMITTER_EMAIL is missing — required as the committer email for the signed rebuild-dist commit. It must match a UID on the imported GPG key and a verified email on the GitHub account that owns the public key. Set it under Settings → Secrets and variables → Actions → Variables."
-            missing=1
-          fi
-          if [ "$missing" -ne 0 ]; then
-            exit 1
-          fi
-
-      - name: Import GPG key
-        if: steps.dist.outputs.changed == 'true'
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
-          gpg_private_key: ${{ secrets.DEPENDABOT_GPG_PRIVATE_KEY }}
-          git_user_signingkey: true
-          git_commit_gpgsign: true
-          git_config_global: true
-          git_committer_name: ${{ vars.DEPENDABOT_GIT_COMMITTER_NAME }}
-          git_committer_email: ${{ vars.DEPENDABOT_GIT_COMMITTER_EMAIL }}
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
+          permission-contents: write
 
-      - name: Commit and push dist
+      - name: Commit dist as oss-automation-bot via createCommitOnBranch
         if: steps.dist.outputs.changed == 'true'
         env:
-          REBUILD_TOKEN: ${{ secrets.DEPENDABOT_REBUILD_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git add dist/
-          git commit -m "chore: rebuild dist after dependency update"
-          git push "https://x-access-token:${REBUILD_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
+          set -euo pipefail
+          # Stage everything under dist/ first. The detect step above uses
+          # `git status --porcelain dist/`, which reports untracked entries
+          # (`??`) — a brand-new ncc chunk or a fresh `licenses.txt` flips
+          # `changed=true`. A plain `git diff HEAD -- dist/` does NOT list
+          # untracked files, so without staging those new files would
+          # silently drop out of `fileChanges` and the mutation would land
+          # an incomplete dist/ (or reject the call outright). `git add -A
+          # dist/` lifts untracked additions into the index so the cached
+          # diff classifies them as `A`.
+          git add -A dist/
+
+          # Walk the staged diff under dist/ and split into additions/deletions.
+          # `--no-renames` keeps the status set to {A,M,D} (rename status
+          # `R` would produce a three-column record requiring different
+          # parsing); `-z` makes records null-terminated so paths with
+          # spaces never break the split. dist/ paths don't contain
+          # spaces today, but the safe form costs nothing and removes a
+          # future foot-gun.
+          #
+          # `git diff -z --name-status` emits paired NUL-separated fields
+          # per record: `<status>\0<path>\0` (NOT a single tab-joined
+          # field). Read two paired NUL-terminated fields per iteration.
+          additions='[]'
+          deletions='[]'
+          while IFS= read -r -d '' status && IFS= read -r -d '' path; do
+            case "$status" in
+              A|M)
+                # createCommitOnBranch's `FileAddition.contents` is a
+                # Base64String; `-w0` keeps the encoded blob single-line
+                # so jq's `--arg` substitution and the final JSON payload
+                # both stay valid.
+                content_b64=$(base64 -w0 "$path")
+                additions=$(jq --arg p "$path" --arg c "$content_b64" \
+                  '. + [{path: $p, contents: $c}]' <<<"$additions")
+                ;;
+              D)
+                deletions=$(jq --arg p "$path" '. + [{path: $p}]' <<<"$deletions")
+                ;;
+              *)
+                echo "::error::Unexpected git status '$status' for '$path'."
+                exit 1
+                ;;
+            esac
+          done < <(git diff --cached --name-status --no-renames -z -- dist/)
+
+          # Single GraphQL mutation. The App-installation token
+          # authenticates the call so GitHub signs the resulting commit
+          # server-side — the rebuild-dist commit lands Verified with
+          # author/committer = oss-automation-bot[bot], no local
+          # committer config required. `expectedHeadOid` pins the parent
+          # commit: if a maintainer pushed to the branch during the
+          # build, the mutation fails rather than silently overwriting
+          # their work. The resulting `synchronize` event is attributed
+          # to the App identity (not GITHUB_TOKEN), so downstream
+          # required-check workflows fire on the new head — matching
+          # the property the reconciler exploits via `gh pr
+          # update-branch`, and avoiding the GITHUB_TOKEN anti-loop
+          # suppression that would otherwise leave stale checks blocking
+          # auto-merge under `strict_required_status_checks_policy: true`.
+          jq -n \
+            --arg repo "$REPO" \
+            --arg branch "$BRANCH" \
+            --arg head_oid "$HEAD_SHA" \
+            --argjson additions "$additions" \
+            --argjson deletions "$deletions" \
+            '{
+              query: "mutation($r:String!,$b:String!,$h:GitObjectID!,$a:[FileAddition!]!,$d:[FileDeletion!]!){createCommitOnBranch(input:{branch:{repositoryNameWithOwner:$r,branchName:$b},message:{headline:\"chore: rebuild dist after dependency update\"},fileChanges:{additions:$a,deletions:$d},expectedHeadOid:$h}){commit{oid}}}",
+              variables: {r: $repo, b: $branch, h: $head_oid, a: $additions, d: $deletions}
+            }' \
+            | gh api graphql --input - --silent
 
   auto-merge:
     # Skip on label events — auto-merge is set once at open/synchronize time. If a maintainer later

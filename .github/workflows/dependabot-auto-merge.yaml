@@ -281,7 +281,7 @@ jobs:
           && !contains(github.event.pull_request.labels.*.name, 'trust-boundary')
           && !contains(github.event.pull_request.labels.*.name, 'security-review-required')
         env:
-          GH_TOKEN: ${{ secrets.DEPENDABOT_APPROVE_TOKEN }}
+          GH_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         # This step is intentionally fail-open: any failure (missing token, revoked PAT,
         # insufficient PAT scope, transient GitHub API error, malformed response) emits a
@@ -301,7 +301,7 @@ jobs:
           set +e
           set -uo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::DEPENDABOT_APPROVE_TOKEN is not set — skipping auto-approval. The merge step will fall back to GitHub auto-merge, which waits for a manual code-owner approval. Configure a fine-grained PAT scoped to this repo (Pull requests: write) belonging to a code-owner and store it under Settings → Secrets and variables → Dependabot → DEPENDABOT_APPROVE_TOKEN."
+            echo "::warning::CODEOWNER_APPROVER_TOKEN is not set in the Dependabot secret store — skipping auto-approval. The merge step will fall back to GitHub auto-merge, which waits for a manual code-owner approval. Configure a fine-grained PAT scoped to this repo (Pull requests: write) belonging to a code-owner and mirror the same value under Settings → Secrets and variables → Dependabot → CODEOWNER_APPROVER_TOKEN (Dependabot-triggered workflows cannot read Actions secrets, so the Actions-store copy used by dependabot-reconciler.yaml is not visible here)."
             exit 0
           fi
           if ! label_state=$(gh pr view "$PR_URL" --json labels --jq 'any(.labels[]; .name == "trust-boundary" or .name == "security-review-required")'); then
@@ -313,7 +313,7 @@ jobs:
             exit 0
           fi
           if ! gh pr review --approve --body "Auto-approved by the Dependabot Auto-Merge workflow (non-major, no security-review label)." "$PR_URL"; then
-            echo "::warning::Failed to post auto-approval review (likely a revoked or insufficiently-scoped DEPENDABOT_APPROVE_TOKEN, or a transient GitHub API error). The merge step will fall back to GitHub auto-merge."
+            echo "::warning::Failed to post auto-approval review (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a transient GitHub API error). The merge step will fall back to GitHub auto-merge."
             exit 0
           fi
 
@@ -329,7 +329,7 @@ jobs:
       #      `gh pr view --json reviewDecision == APPROVED`, which is GitHub's own answer
       #      to "is this PR sufficiently approved per the ruleset?" — including the code-
       #      owner-review requirement. This is stricter than checking whether the auto-
-      #      approval step exited 0: if `DEPENDABOT_APPROVE_TOKEN` belongs to a non-CODEOWNER
+      #      approval step exited 0: if `CODEOWNER_APPROVER_TOKEN` belongs to a non-CODEOWNER
       #      identity, `gh pr review --approve` succeeds but `reviewDecision` stays
       #      `REVIEW_REQUIRED` and we correctly fall back instead of failing on the merge.
       #   2. Fail-closed label query. Both security-review labels (trust-boundary,

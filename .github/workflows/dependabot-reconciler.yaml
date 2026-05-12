@@ -17,12 +17,12 @@ name: Dependabot Reconciler
 #      this workflow now uses (and `github-actions[bot]` for the legacy
 #      GITHUB_TOKEN fallback that no longer exists in this workflow). Neither
 #      identity is `dependabot[bot]`, so the resulting workflow run executes
-#      in Actions-secrets context — the auto-merge workflow's
-#      `DEPENDABOT_APPROVE_TOKEN` (a Dependabot secret) is unreadable there
-#      and its re-approve step no-ops. This workflow holds the codeowner-
-#      approver PAT in the Actions secret store (`secrets.CODEOWNER_APPROVER_TOKEN`)
-#      so the re-approval can restore the dismissed bot review from the
-#      Actions-side context.
+#      in Actions-secrets context — the auto-merge workflow's Dependabot-store
+#      copy of `CODEOWNER_APPROVER_TOKEN` is unreadable there and its re-approve
+#      step no-ops. This workflow reads the same PAT from the Actions secret
+#      store (the codeowner-approver PAT is mirrored under the same name in
+#      both stores) so the re-approval can restore the dismissed bot review
+#      from the Actions-side context.
 #   3. Auto-merge enable that silently failed (the case `verify_auto_merge_or_terminal`
 #      in dependabot-auto-merge.yaml exists to surface) and any dropped event from
 #      transient GitHub API errors.

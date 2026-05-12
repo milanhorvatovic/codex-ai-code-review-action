@@ -187,13 +187,13 @@ All three coexist intentionally. The exclude list is the declarative defense (fa
 
 The default-branch ruleset on `main` requires one approving code-owner review before merge. `GITHUB_TOKEN` cannot approve PRs and Dependabot cannot approve its own PRs, so without an additional approver auto-merge would never complete. To close that gap, the auto-merge job posts an approving review *before* enabling auto-merge, gated by the same set of guards above (semver-major bumps, the `openai/codex-action` exclude, and either security-review label).
 
-The approval is posted using a fine-grained PAT belonging to a code-owner, stored as the Dependabot secret **`DEPENDABOT_APPROVE_TOKEN`**. The PAT must be:
+The approval is posted using a fine-grained PAT belonging to a code-owner, stored under the canonical name **`CODEOWNER_APPROVER_TOKEN`** in **both** the Dependabot secret store (consumed by the auto-merge workflow's auto-approval step in Dependabot context) and the Actions secret store (consumed by `dependabot-reconciler.yaml`'s re-approval step, which runs from `push`/`schedule`/`workflow_run` triggers and cannot see Dependabot secrets). The same PAT value lives under both store entries — workflows triggered by Dependabot do not have access to Actions secrets and vice versa, so the dual-store mirror is structural. The PAT must be:
 
 - Scoped to this repository.
 - Granted `Pull requests: write` permission (sufficient to submit a review).
 - Owned by a user listed in [`.github/CODEOWNERS`](.github/CODEOWNERS), so the review counts toward the code-owner requirement.
 
-Configure under **Settings → Secrets and variables → Dependabot → New secret**. Workflows triggered by Dependabot do not have access to Actions secrets, so the value must live under the Dependabot scope.
+Configure under **Settings → Secrets and variables → Dependabot → New secret** *and* under **Settings → Secrets and variables → Actions → New repository secret**, using the same `CODEOWNER_APPROVER_TOKEN` name and the same PAT value in both places. Rotate both copies together when the PAT expires.
 
 When the secret is unset, the approval step emits a warning and exits cleanly — auto-merge is still enabled, but the PR waits for a manual approving review.
 

@@ -66,20 +66,27 @@ jobs:
           fi
 
       # Mint a short-lived token from the `oss-automation-bot` GitHub App.
-      # Used to authenticate the rebuild-dist push and to attribute the
-      # commit to the App's bot user. Replaces the legacy stack of four
-      # configuration items split across two stores — two Dependabot
-      # secrets (`DEPENDABOT_REBUILD_TOKEN`, `DEPENDABOT_GPG_PRIVATE_KEY`)
-      # and two Actions variables (`DEPENDABOT_GIT_COMMITTER_NAME`,
-      # `DEPENDABOT_GIT_COMMITTER_EMAIL`) — plus the GPG import step. The
-      # GPG dance was historically justified as "required to satisfy
-      # main's required_signatures rule" but the repository's branch
-      # ruleset (verified against the live `Default branch` ruleset) does
-      # not include `required_signatures`, so the prior commit signatures
-      # were gratuitous; the rebuild-dist commits now land as Unverified
-      # and no ruleset rejects them. `create-github-app-token` fails the
-      # job if `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY`
-      # is missing, which subsumes the prior `Validate rebuild-dist
+      # Used to authenticate the GraphQL `createCommitOnBranch` mutation
+      # that lands the rebuilt dist/ on the PR branch. Replaces the legacy
+      # stack of four configuration items split across two stores — two
+      # Dependabot secrets (`DEPENDABOT_REBUILD_TOKEN`,
+      # `DEPENDABOT_GPG_PRIVATE_KEY`) and two Actions variables
+      # (`DEPENDABOT_GIT_COMMITTER_NAME`, `DEPENDABOT_GIT_COMMITTER_EMAIL`)
+      # — plus the GPG import step.
+      #
+      # Why GraphQL rather than plain `git push`: pushes from an
+      # App-installation token over HTTPS authenticate the push but do
+      # NOT sign the locally-created commit, so a `git push` path would
+      # land rebuild-dist commits as Unverified. `createCommitOnBranch`
+      # creates the commit server-side under the authenticated App
+      # identity; GitHub signs commits authored via this mutation on
+      # behalf of the App, so rebuild-dist commits stay Verified just
+      # like under the prior GPG flow — without any GPG key or
+      # committer-identity configuration to manage.
+      #
+      # `create-github-app-token` fails the job if
+      # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
+      # missing, which subsumes the prior `Validate rebuild-dist
       # configuration` step's role. The private key must exist in BOTH
       # the Actions and Dependabot secrets stores — Dependabot-triggered
       # workflows cannot read Actions secrets and vice versa, the same
@@ -88,11 +95,10 @@ jobs:
       #
       # The token is narrowed to `contents: write` only. Omitting
       # `permission-*` inputs would mint with the App installation's
-      # full permission set; this step's two consumers — `git push` to
-      # the PR branch and `GET /users/{username}` for the bot-user
-      # lookup (a public endpoint that requires no permission scope) —
-      # both work under contents-only, so the broader scopes are
-      # avoidable privilege expansion in a Dependabot-context job.
+      # full permission set; the sole consumer of this token is the
+      # `createCommitOnBranch` mutation, which requires `contents:
+      # write`, so broader scopes are avoidable privilege expansion in
+      # a Dependabot-context job.
       - name: Mint oss-automation-bot token for dist push
         if: steps.dist.outputs.changed == 'true'
         id: app-token
@@ -102,34 +108,72 @@ jobs:
           private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
           permission-contents: write
 
-      - name: Commit and push dist as oss-automation-bot
+      - name: Commit dist as oss-automation-bot via createCommitOnBranch
         if: steps.dist.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Resolve the App's bot user record so the commit's committer
-          # fields point at the bot's profile. The `<id>+<slug>[bot]@users.noreply.github.com`
-          # form is GitHub's canonical no-reply pattern for bot users —
-          # the numeric prefix is what links the commit to the bot's
-          # profile page in the GitHub UI; without it the commit shows
-          # the right name but isn't clickable.
-          app_user_id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
-          git config user.name "${APP_SLUG}[bot]"
-          git config user.email "${app_user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
-          git add dist/
-          git commit -m "chore: rebuild dist after dependency update"
-          # Push with the App-minted token. The resulting `synchronize`
-          # event is attributed to the App identity (not GITHUB_TOKEN),
-          # so downstream required-check workflows fire on the new head
-          # — matching the reconciler's `gh pr update-branch` pattern
-          # and avoiding the GITHUB_TOKEN anti-loop suppression that
-          # would otherwise leave stale checks blocking auto-merge
-          # under `strict_required_status_checks_policy: true`.
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
+          # Walk the diff under dist/ and split into additions/deletions.
+          # `--no-renames` keeps the status set to {A,M,D} (rename status
+          # `R` would produce a three-column record requiring different
+          # parsing); `-z` makes records null-terminated so paths with
+          # spaces never break the split. dist/ paths don't contain
+          # spaces today, but the safe form costs nothing and removes a
+          # future foot-gun.
+          additions='[]'
+          deletions='[]'
+          while IFS=$'\t' read -r -d '' record; do
+            status="${record%%$'\t'*}"
+            path="${record#*$'\t'}"
+            case "$status" in
+              A|M)
+                # createCommitOnBranch's `FileAddition.contents` is a
+                # Base64String; `-w0` keeps the encoded blob single-line
+                # so jq's `--arg` substitution and the final JSON payload
+                # both stay valid.
+                content_b64=$(base64 -w0 "$path")
+                additions=$(jq --arg p "$path" --arg c "$content_b64" \
+                  '. + [{path: $p, contents: $c}]' <<<"$additions")
+                ;;
+              D)
+                deletions=$(jq --arg p "$path" '. + [{path: $p}]' <<<"$deletions")
+                ;;
+              *)
+                echo "::error::Unexpected git status '$status' for '$path'."
+                exit 1
+                ;;
+            esac
+          done < <(git diff --name-status --no-renames -z HEAD -- dist/)
+
+          # Single GraphQL mutation. The App-installation token
+          # authenticates the call so GitHub signs the resulting commit
+          # server-side — the rebuild-dist commit lands Verified with
+          # author/committer = oss-automation-bot[bot], no local
+          # committer config required. `expectedHeadOid` pins the parent
+          # commit: if a maintainer pushed to the branch during the
+          # build, the mutation fails rather than silently overwriting
+          # their work. The resulting `synchronize` event is attributed
+          # to the App identity (not GITHUB_TOKEN), so downstream
+          # required-check workflows fire on the new head — matching
+          # the property the reconciler exploits via `gh pr
+          # update-branch`, and avoiding the GITHUB_TOKEN anti-loop
+          # suppression that would otherwise leave stale checks blocking
+          # auto-merge under `strict_required_status_checks_policy: true`.
+          jq -n \
+            --arg repo "$REPO" \
+            --arg branch "$BRANCH" \
+            --arg head_oid "$HEAD_SHA" \
+            --argjson additions "$additions" \
+            --argjson deletions "$deletions" \
+            '{
+              query: "mutation($r:String!,$b:String!,$h:GitObjectID!,$a:[FileAddition!]!,$d:[FileDeletion!]!){createCommitOnBranch(input:{branch:{repositoryNameWithOwner:$r,branchName:$b},message:{headline:\"chore: rebuild dist after dependency update\"},fileChanges:{additions:$a,deletions:$d},expectedHeadOid:$h}){commit{oid}}}",
+              variables: {r: $repo, b: $branch, h: $head_oid, a: $additions, d: $deletions}
+            }' \
+            | gh api graphql --input - --silent
 
   auto-merge:
     # Skip on label events — auto-merge is set once at open/synchronize time. If a maintainer later

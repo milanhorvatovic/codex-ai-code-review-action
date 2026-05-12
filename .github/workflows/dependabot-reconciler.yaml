@@ -186,17 +186,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          # Actions-context mirror of the Dependabot secret used by
-          # dependabot-auto-merge.yaml's auto-approval step. Same PAT,
-          # separate secret entry — workflows triggered by
+          # Codeowner-approver PAT (per oss-automation/bots.md). One identity,
+          # held in both stores under the same name: Actions store consumed
+          # here, Dependabot store consumed by dependabot-auto-merge.yaml's
+          # auto-approval step. Workflows triggered by
           # `push`/`schedule`/`workflow_run`/`workflow_dispatch` cannot read
-          # Dependabot secrets, so a dedicated Actions-context mirror is
-          # required. If unset, re-approve degrades to a warning and the PR
-          # waits for manual approval. Per oss-automation/conventions.md,
-          # this PAT identity is referred to as the codeowner-approver
-          # token; the Dependabot-context counterpart will rename to
-          # `CODEOWNER_APPROVER_TOKEN` at the next rotation.
-          APPROVE_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN_ACTIONS }}
+          # Dependabot secrets and vice versa, so the value lives in both
+          # stores; the trigger context determines which one this reference
+          # resolves against. If unset, re-approve degrades to a warning and
+          # the PR waits for manual approval.
+          APPROVE_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
           # App-minted token from the `oss-automation-bot` step above. The
           # `create-github-app-token` action fails the job if
           # `vars.AUTOMATION_APP_ID` or `secrets.AUTOMATION_PRIVATE_KEY` is
@@ -598,13 +597,13 @@ jobs:
                     review="APPROVED"
                     echo "Re-approved."
                   else
-                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision is '${post_approve_decision}' (need APPROVED). The CODEOWNER_APPROVER_TOKEN_ACTIONS identity likely does not satisfy the branch ruleset's CODEOWNER requirement; auto-merge will remain blocked. Configure a token belonging to a code-owner."
+                    echo "::warning::PR #${pr}: re-approve posted but reviewDecision is '${post_approve_decision}' (need APPROVED). The CODEOWNER_APPROVER_TOKEN identity likely does not satisfy the branch ruleset's CODEOWNER requirement; auto-merge will remain blocked. Configure a token belonging to a code-owner."
                   fi
                 else
-                  echo "::warning::PR #${pr}: re-approve failed (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN_ACTIONS, or a non-CODEOWNER identity)."
+                  echo "::warning::PR #${pr}: re-approve failed (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a non-CODEOWNER identity)."
                 fi
               else
-                echo "::warning::PR #${pr} is auto-merge-armed but reviewDecision=${review} and CODEOWNER_APPROVER_TOKEN_ACTIONS is unset; cannot restore approval. Configure the secret or approve manually."
+                echo "::warning::PR #${pr} is auto-merge-armed but reviewDecision=${review} and CODEOWNER_APPROVER_TOKEN is unset; cannot restore approval. Configure the secret or approve manually."
               fi
             fi
 

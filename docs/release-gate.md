@@ -9,7 +9,7 @@ The CI pipeline already runs every check that can be automated. This gate is the
 The gate applies to both release paths documented in [`CONTRIBUTING.md`](../CONTRIBUTING.md#release-process). Pick the working surface that matches the path you are using:
 
 1. **Pick the working surface for the filled gate.**
-   - **Automated path (default).** Open the release PR created by `prepare-release.yaml`, titled `release: v<X.Y.Z>`. Its body is composed by `scripts/prepare-release.ts` and already includes a sign-off checklist that points back at this page; the release PR description is the working surface.
+   - **Automated path (default).** Open the release PR created by `prepare-release.yaml`, titled `v<X.Y.Z>`. Its body is composed by `scripts/prepare-release.ts` and already includes a sign-off checklist that points back at this page; the release PR description is the working surface.
    - **Manual path (fallback).** Create a local working copy of this page on the release branch (for example `release-gate-v<X.Y.Z>.md`) before merging the release commit. The local file is the working surface and ships in the evidence zip after tagging.
 2. Walk this page top to bottom against the merge candidate (the release branch's HEAD before the squash-merge or before the local merge to `main`). Every pre-merge item must end up either checked off (with a verified-by line) or explicitly waived (with a rationale). The post-tag item under [Archiving the gate](#archiving-the-gate) is completed after `release.yaml` creates the GitHub Release.
 3. Record the filled-in gate on the working surface picked in step 1 so the sign-off is visible before merging:

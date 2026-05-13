@@ -232,20 +232,26 @@ jobs:
           # Filename whitelisting is not enough — `.github/workflows/codex-review.yaml` is
           # executable CI config. Validate that every changed line in the PR's diff is
           # either a self-pin SHA bump or a SHA-tag-note version bump, with all other
-          # characters identical between the removed and added sides. A regression in
-          # refresh-self-pins.ts that smuggles non-SHA edits into a whitelisted file
-          # trips this check and blocks both auto-approval and auto-merge.
+          # characters identical between the removed and added sides. The validator is
+          # invoked in strict mode with the just-published tag's SHA and version, so the
+          # added (`+`) self-pins and tag-notes must reference exactly those values; a
+          # refresh PR that updates to any other 40-hex SHA or any other semver tag
+          # trips this check. Together with the file-set whitelist above, this blocks
+          # both regressions in refresh-self-pins.ts that smuggle non-SHA edits into a
+          # whitelisted file and regressions that refresh to the wrong commit.
+          TAG_SHA="$(git rev-parse "${GITHUB_REF_NAME}^{}")"
+          VERSION_NUM="${GITHUB_REF_NAME#v}"
           if ! diff_text=$(gh pr diff "${PR}"); then
             echo "::warning::Failed to read the unified diff for PR #${PR}; skipping auto-approval and refusing to enable auto-merge."
             echo "guard_ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! printf '%s' "${diff_text}" | npx --no-install tsx scripts/validate-self-pin-diff.ts; then
-            echo "::warning::Refresh PR #${PR} diff contains changes outside the expected SHA-pin / tag-comment refresh; skipping auto-approval and refusing to enable auto-merge. Investigate before merging — refresh-self-pins.ts may have regressed."
+          if ! printf '%s' "${diff_text}" | npx --no-install tsx scripts/validate-self-pin-diff.ts "${TAG_SHA}" "${VERSION_NUM}"; then
+            echo "::warning::Refresh PR #${PR} diff contains changes outside the expected SHA-pin / tag-comment refresh for v${VERSION_NUM} (${TAG_SHA}); skipping auto-approval and refusing to enable auto-merge. Investigate before merging — refresh-self-pins.ts may have regressed."
             echo "guard_ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${GITHUB_REF_NAME#v} tag was published. SHA-only updates to README.md and .github/workflows/codex-review.yaml were verified against the post-tag file-set whitelist and a unified-diff content check that asserts every changed line is a self-pin SHA bump or a SHA-tag-note version bump; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
+          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${VERSION_NUM} tag was published. SHA-only updates to README.md and .github/workflows/codex-review.yaml were verified against the post-tag file-set whitelist and a strict unified-diff content check that asserts every added self-pin references exactly ${TAG_SHA} and every added SHA-tag-note references exactly v${VERSION_NUM}; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
             echo "::warning::Failed to post auto-approval review on PR #${PR} (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a transient GitHub API error). The merge step will fall back to enabling GitHub auto-merge."
             exit 0
           fi

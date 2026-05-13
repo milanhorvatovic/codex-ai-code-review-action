@@ -166,10 +166,15 @@ jobs:
       # satisfied without a manual click. The PAT in CODEOWNER_APPROVER_TOKEN belongs to a
       # code-owner (see Settings → Secrets and variables → Actions); the App identity that
       # opened the PR cannot approve its own PR, hence the separate token. The step is
-      # intentionally fail-open — any failure (missing token, revoked PAT, file-set guard
-      # tripped) emits a warning and exits 0, and the merge step below falls back to
-      # enabling GitHub auto-merge, which then waits for a manual code-owner approval.
+      # intentionally fail-open for transport failures (missing token, revoked PAT,
+      # transient API errors): those emit a warning and exit 0, and the merge step below
+      # still arms GitHub auto-merge, which then waits for a manual code-owner approval.
+      # The file-set whitelist trip is the one exception: it emits `guard_ok=false` on
+      # `$GITHUB_OUTPUT`, which the merge step gates on, so a refresh PR that touches
+      # non-whitelisted files never auto-merges — neither via an existing approval nor via
+      # a later manual one. Investigate refresh-self-pins.ts before merging it by hand.
       - name: Auto-approve self-pin refresh PR
+        id: approve-refresh
         if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' }}
         env:
           GH_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
@@ -188,6 +193,7 @@ jobs:
           if echo "${changed}" | grep -Ev '^(README\.md|\.github/workflows/codex-review\.yaml)$' >/dev/null; then
             echo "::warning::Refresh PR #${PR} touches files outside the whitelist (README.md, .github/workflows/codex-review.yaml); skipping auto-approval and refusing to enable auto-merge. Investigate before merging — refresh-self-pins.ts may have regressed:"
             echo "${changed}" | awk '{print "  " $0}'
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${GITHUB_REF_NAME#v} tag was published. SHA-only updates to README.md and .github/workflows/codex-review.yaml were verified against the post-tag file-set whitelist; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
@@ -198,12 +204,16 @@ jobs:
       # Enable GitHub's auto-merge primitive on the refresh PR so the PR squash-merges as
       # soon as required status checks pass (and an APPROVED review is recorded — by the
       # step above on the happy path, or by a manual code-owner approval on the fallback
-      # path). Independent of auto-approval: if the previous step warned and skipped, this
-      # step still arms auto-merge so a later manual approval fires the merge without
-      # further intervention. The step is also fail-open — a `gh pr merge --auto` failure
+      # path). Independent of auto-approval for transport failures: if the previous step
+      # warned and skipped because of a missing/revoked token or a transient API error,
+      # this step still arms auto-merge so a later manual approval fires the merge without
+      # further intervention. The file-set whitelist trip is the only blocking failure
+      # — the approve step emits `guard_ok=false` on that path and this step's condition
+      # below refuses to arm auto-merge, so a refresh PR with non-whitelisted files never
+      # auto-merges. The step itself is also fail-open — a `gh pr merge --auto` failure
       # warns and exits 0, leaving the PR open for manual merge.
       - name: Enable auto-merge on self-pin refresh PR
-        if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' }}
+        if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' && steps.approve-refresh.outputs.guard_ok != 'false' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR: ${{ steps.refresh-pr.outputs.number }}

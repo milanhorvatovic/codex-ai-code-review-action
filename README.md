@@ -218,7 +218,7 @@ jobs:
           persist-credentials: false
 
       - id: prepare
-        uses: milanhorvatovic/codex-ai-code-review-action/prepare@357e3f341a63345c381ad390ed2afa9aa2c366d5 # v2.1.0-rc.1
+        uses: milanhorvatovic/codex-ai-code-review-action/prepare@dd72357dbc38a6f0b07d351e76a2d7bca4e95ca1 # v2.1.0
         with:
           allow-users: alice,bob,charlie # replace with real GitHub usernames; an empty value allows everyone
           # Add one pattern per line. Other common entries: yarn.lock, pnpm-lock.yaml, vendor/**.
@@ -252,7 +252,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: milanhorvatovic/codex-ai-code-review-action/review@357e3f341a63345c381ad390ed2afa9aa2c366d5 # v2.1.0-rc.1
+      - uses: milanhorvatovic/codex-ai-code-review-action/review@dd72357dbc38a6f0b07d351e76a2d7bca4e95ca1 # v2.1.0
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           chunk: ${{ matrix.chunk }}
@@ -278,7 +278,7 @@ jobs:
           path: .codex/
           merge-multiple: true
 
-      - uses: milanhorvatovic/codex-ai-code-review-action/publish@357e3f341a63345c381ad390ed2afa9aa2c366d5 # v2.1.0-rc.1
+      - uses: milanhorvatovic/codex-ai-code-review-action/publish@dd72357dbc38a6f0b07d351e76a2d7bca4e95ca1 # v2.1.0
         with:
           github-token: ${{ github.token }}
           expected-chunks: ${{ needs.prepare.outputs.chunk-count }}

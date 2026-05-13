@@ -122,8 +122,14 @@ jobs:
           else
             git push origin "${BRANCH}"
           fi
-          if gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number' | grep -q '^[0-9]'; then
-            echo "Refresh PR for ${BRANCH} already open; leaving it as-is."
+          # Scope the existing-PR check to refresh-class PRs only: same repo (`gh pr list`
+          # matches `--head BRANCH` across forks too, so a fork PR with the deterministic
+          # refresh branch name would otherwise trick this step into thinking a refresh PR
+          # already exists and skip creating the base-repo PR) and `--base main` (a stale
+          # same-repo PR with the same branch name targeting a different base must not
+          # short-circuit creation of the main-base refresh PR).
+          if gh pr list --head "${BRANCH}" --base main --state open --json number,isCrossRepository --jq 'first(.[] | select(.isCrossRepository == false) | .number) // empty' | grep -q '^[0-9]'; then
+            echo "Refresh PR for ${BRANCH} (base main, same repo) already open; leaving it as-is."
             exit 0
           fi
           LABELS="release: patch,documentation"
@@ -140,3 +146,145 @@ jobs:
             --title "docs: refresh self-pin SHAs to v${VERSION_NUM}" \
             --label "${LABELS}" \
             --body "${BODY}"
+
+      # Resolve the refresh PR number for the auto-approve and auto-merge steps below. This
+      # runs whether the previous step opened a new PR or found an existing one (e.g. on a
+      # release.yaml re-run for the same tag), and is a no-op when no diff was produced so
+      # no PR exists. Fail-open like the steps that follow: a transient `gh pr list` outage
+      # warns and emits an empty `number` output (the downstream steps then short-circuit
+      # on `outputs.number != ''`) instead of aborting the whole release job.
+      #
+      # The query filters to refresh-class PRs only — same repo (`gh pr list --head BRANCH`
+      # matches by branch name across forks too, so a fork PR named
+      # `docs/refresh-self-pins-vX.Y.Z` would otherwise be selectable here and the
+      # downstream auto-approve / auto-merge steps would target the wrong PR) and
+      # `--base main` (a stale same-repo PR with the same head branch targeting a different
+      # base must not be selected as the main-base refresh PR). `isCrossRepository == false`
+      # is the cross-repo predicate; `--base main` is the base-ref predicate.
+      - name: Resolve self-pin refresh PR number
+        id: refresh-pr
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set +e
+          set -uo pipefail
+          VERSION_NUM="${GITHUB_REF_NAME#v}"
+          BRANCH="docs/refresh-self-pins-v${VERSION_NUM}"
+          if ! PR=$(gh pr list --head "${BRANCH}" --base main --state open --json number,isCrossRepository --jq 'first(.[] | select(.isCrossRepository == false) | .number) // empty'); then
+            echo "::warning::Failed to query open refresh PRs for ${BRANCH} (likely a transient gh CLI or GitHub API outage); auto-approve and auto-merge steps will no-op for this run. The refresh PR — if one was opened — remains open for manual review."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${PR}" ]; then
+            echo "No open main-base refresh PR for ${BRANCH} on the base repo (cross-repo / fork PRs and PRs targeting a non-main base are ignored); auto-approve and auto-merge steps will no-op."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "number=${PR}" >> "$GITHUB_OUTPUT"
+
+      # Auto-approve the refresh PR so the protected-main CODEOWNER review requirement is
+      # satisfied without a manual click. The PAT in CODEOWNER_APPROVER_TOKEN belongs to a
+      # code-owner (see Settings → Secrets and variables → Actions); the App identity that
+      # opened the PR cannot approve its own PR, hence the separate token.
+      #
+      # Posture: any path where a safety check did not run to completion emits
+      # `guard_ok=false` on `$GITHUB_OUTPUT`, which the merge step gates on, so the refresh
+      # PR never auto-merges — neither via an existing approval nor via a later manual
+      # one. The maintainer must merge by hand after reviewing the diff.
+      #
+      # `guard_ok=false` paths (safety check did not complete):
+      #   1. missing CODEOWNER_APPROVER_TOKEN — the action token cannot read the PR diff
+      #      under its own identity (the PAT is required for both approval and for
+      #      reading the diff under a code-owner identity);
+      #   2. `gh pr diff --name-only` transport failure — the file-set whitelist could
+      #      not be evaluated;
+      #   3. file-set whitelist trip — diff touches files other than the two known
+      #      self-pin targets, indicating refresh-self-pins.ts pushed unexpected files;
+      #   4. `gh pr diff` transport failure — the unified-diff content check could
+      #      not be evaluated;
+      #   5. unified-diff content check trip — diff includes line-level changes that are
+      #      not SHA-pin or SHA-tag-note bumps, indicating refresh-self-pins.ts smuggled
+      #      non-SHA edits into a whitelisted file.
+      #
+      # `guard_ok` left unset (auto-merge still arms; manual approval can fire it):
+      #   - `gh pr review --approve` transport failure — both safety checks already
+      #     completed cleanly; only the approval post failed, so a manual code-owner
+      #     approval is safe to substitute.
+      - name: Auto-approve self-pin refresh PR
+        id: approve-refresh
+        if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
+          PR: ${{ steps.refresh-pr.outputs.number }}
+        run: |
+          set +e
+          set -uo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::CODEOWNER_APPROVER_TOKEN is not set in the Actions secret store — skipping auto-approval and refusing to enable auto-merge because the file-set whitelist and content checks cannot run without a code-owner identity. The PR remains open for a manual review + merge until the PAT is configured. Configure a fine-grained PAT scoped to this repo (Pull requests: write) belonging to a code-owner and mirror the same value under Settings → Secrets and variables → Actions → CODEOWNER_APPROVER_TOKEN (Dependabot-triggered workflows read from the Dependabot secret store, so the existing copy used by dependabot-auto-merge.yaml is not visible here)."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! changed=$(gh pr diff "${PR}" --name-only); then
+            echo "::warning::Failed to read the changed file set on PR #${PR} (likely a transient gh CLI or GitHub API outage); skipping auto-approval and refusing to enable auto-merge because the file-set whitelist could not be evaluated. The PR remains open for a manual review + merge."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if echo "${changed}" | grep -Ev '^(README\.md|\.github/workflows/codex-review\.yaml)$' >/dev/null; then
+            echo "::warning::Refresh PR #${PR} touches files outside the whitelist (README.md, .github/workflows/codex-review.yaml); skipping auto-approval and refusing to enable auto-merge. Investigate before merging — refresh-self-pins.ts may have regressed:"
+            echo "${changed}" | awk '{print "  " $0}'
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Filename whitelisting is not enough — `.github/workflows/codex-review.yaml` is
+          # executable CI config. Validate that every changed line in the PR's diff is
+          # either a self-pin SHA bump or a SHA-tag-note version bump, with all other
+          # characters identical between the removed and added sides. The validator is
+          # invoked in strict mode with the just-published tag's SHA and version, so the
+          # added (`+`) self-pins and tag-notes must reference exactly those values; a
+          # refresh PR that updates to any other 40-hex SHA or any other semver tag
+          # trips this check. Together with the file-set whitelist above, this blocks
+          # both regressions in refresh-self-pins.ts that smuggle non-SHA edits into a
+          # whitelisted file and regressions that refresh to the wrong commit.
+          TAG_SHA="$(git rev-parse "${GITHUB_REF_NAME}^{}")"
+          VERSION_NUM="${GITHUB_REF_NAME#v}"
+          if ! diff_text=$(gh pr diff "${PR}"); then
+            echo "::warning::Failed to read the unified diff for PR #${PR}; skipping auto-approval and refusing to enable auto-merge."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! printf '%s' "${diff_text}" | npx --no-install tsx scripts/validate-self-pin-diff.ts "${TAG_SHA}" "${VERSION_NUM}"; then
+            echo "::warning::Refresh PR #${PR} diff contains changes outside the expected SHA-pin / tag-comment refresh for v${VERSION_NUM} (${TAG_SHA}); skipping auto-approval and refusing to enable auto-merge. Investigate before merging — refresh-self-pins.ts may have regressed."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${VERSION_NUM} tag was published. SHA-only updates to README.md and .github/workflows/codex-review.yaml were verified against the post-tag file-set whitelist and a strict unified-diff content check that asserts every added self-pin references exactly ${TAG_SHA} and every added SHA-tag-note references exactly v${VERSION_NUM}; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
+            echo "::warning::Failed to post auto-approval review on PR #${PR} (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a transient GitHub API error). The merge step will fall back to enabling GitHub auto-merge."
+            exit 0
+          fi
+
+      # Enable GitHub's auto-merge primitive on the refresh PR so the PR squash-merges as
+      # soon as required status checks pass (and an APPROVED review is recorded — by the
+      # step above on the happy path, or by a manual code-owner approval on the
+      # approval-transport-failure path). This step is conditioned on
+      # `steps.approve-refresh.outputs.guard_ok != 'false'`, which means any path in the
+      # approve step where a safety check did not run to completion (missing PAT, file-set
+      # query failure, file-set whitelist trip, content-diff fetch failure, content-check
+      # trip) refuses to arm auto-merge; the maintainer must merge by hand after reviewing
+      # the diff. Only an approval-post transport failure (safety checks completed
+      # cleanly, only the `gh pr review` call failed) leaves `guard_ok` unset so this
+      # step still arms auto-merge that a later manual approval can fire.
+      # The step itself is also fail-open — a `gh pr merge --auto` failure warns and
+      # exits 0, leaving the PR open for manual merge.
+      - name: Enable auto-merge on self-pin refresh PR
+        if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' && steps.approve-refresh.outputs.guard_ok != 'false' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ steps.refresh-pr.outputs.number }}
+        run: |
+          set +e
+          set -uo pipefail
+          if ! gh pr merge --auto --squash --delete-branch "${PR}"; then
+            echo "::warning::Failed to enable auto-merge on PR #${PR} (likely an App-token scope mismatch, a transient GitHub API error, or auto-merge disabled at the repo level — Settings → General → Pull Requests → Allow auto-merge). The PR remains open; merge it manually once CI is green."
+            exit 0
+          fi

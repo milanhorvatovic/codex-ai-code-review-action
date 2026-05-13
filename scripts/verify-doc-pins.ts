@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { SELF_REPO } from "./self-repo.js";
+
 export type CanonicalLocation = { path: string; line: number };
 export type CanonicalEntry = { sha: string; tag?: string; location: CanonicalLocation };
 export type CanonicalMap = Map<string, CanonicalEntry>;
@@ -29,7 +31,7 @@ export type YamlDisagreement = {
 
 export type Drift = DocMismatch | YamlDisagreement;
 
-export const SELF_REPO = "milanhorvatovic/codex-ai-code-review-action";
+export { SELF_REPO };
 
 export const PIN_PATTERN =
   /(?<owner>[\w.-]+)\/(?<repo>[\w.-]+)(?:\/(?<sub>[\w./-]+?))?@(?<sha>[0-9a-f]{40})(?:[ \t]*#[ \t]*(?<tag>[\w.+-]+))?/g;

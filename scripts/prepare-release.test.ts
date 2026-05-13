@@ -33,6 +33,7 @@ import {
   tagCommitTimestamp,
   type PullRequest,
 } from "./prepare-release.js";
+import { SELF_REPO } from "./self-repo.js";
 
 function makePr(overrides: Partial<PullRequest> & { number: number }): PullRequest {
   return {
@@ -827,7 +828,7 @@ describe("resolveGateDocUrl", () => {
 
   it("falls back to upstream host and repository when both env vars are unset", () => {
     expect(resolveGateDocUrl({})).toBe(
-      "https://github.com/milanhorvatovic/codex-ai-code-review-action/blob/main/docs/release-gate.md",
+      `https://github.com/${SELF_REPO}/blob/main/docs/release-gate.md`,
     );
   });
 
@@ -1011,7 +1012,7 @@ describe("buildSignoffSection (with explicit gateDocUrl)", () => {
     expect(section).toContain(`(${url}#security-review-required-cross-reference)`);
     expect(section).toContain(`(${url}#security-review-sign-off)`);
     expect(section).toContain(`(${url}#archiving-the-gate)`);
-    expect(section).not.toContain("milanhorvatovic/codex-ai-code-review-action");
+    expect(section).not.toContain(SELF_REPO);
   });
 });
 
@@ -2004,6 +2005,6 @@ describe("runCli (rerun body-refresh integration)", () => {
       "https://github.fork.example/team/fork-repo/blob/trunk/docs/release-gate.md",
     );
     // Hard-coded upstream URL must NOT appear since git fallback resolved.
-    expect(bodyArg).not.toContain("milanhorvatovic/codex-ai-code-review-action");
+    expect(bodyArg).not.toContain(SELF_REPO);
   });
 });

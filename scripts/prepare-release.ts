@@ -13,6 +13,7 @@ import {
   removeSections,
   type VersionBump,
 } from "./changelog.js";
+import { SELF_REPO } from "./self-repo.js";
 
 export type Label = { name: string };
 
@@ -536,7 +537,6 @@ export function buildAutoHeaderSection(args: {
 // either rebase to a `main`-named default or treat the script as
 // `main`-only.
 const DEFAULT_GATE_DOC_HOST = "https://github.com";
-const DEFAULT_GATE_DOC_REPO = "milanhorvatovic/codex-ai-code-review-action";
 const DEFAULT_GATE_DOC_BRANCH = "main";
 
 export function resolveGateDocUrl(
@@ -545,7 +545,7 @@ export function resolveGateDocUrl(
   branchOverride?: string,
 ): string {
   const host = env.GITHUB_SERVER_URL ?? gitFallback?.host ?? DEFAULT_GATE_DOC_HOST;
-  const repo = env.GITHUB_REPOSITORY ?? gitFallback?.repo ?? DEFAULT_GATE_DOC_REPO;
+  const repo = env.GITHUB_REPOSITORY ?? gitFallback?.repo ?? SELF_REPO;
   const branch =
     branchOverride ??
     gitFallback?.defaultBranch ??

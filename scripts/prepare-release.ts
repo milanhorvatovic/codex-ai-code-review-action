@@ -1072,7 +1072,7 @@ export function runCli(deps: PrepareReleaseDeps = {}): number {
     const stagedDiff = runGit(["diff", "--cached", "--name-only"]).trim();
     const hasFileChanges = stagedDiff !== "";
     if (hasFileChanges) {
-      runGit(["commit", "-m", `release: v${targetVersion}`]);
+      runGit(["commit", "-m", `v${targetVersion}`]);
       if (remoteSha === "") {
         runGit(["push", "origin", branch]);
       } else {
@@ -1151,7 +1151,7 @@ export function runCli(deps: PrepareReleaseDeps = {}): number {
         "--head",
         branch,
         "--title",
-        `release: v${targetVersion}`,
+        `v${targetVersion}`,
         "--label",
         "release: skip",
         "--body",

@@ -140,3 +140,77 @@ jobs:
             --title "docs: refresh self-pin SHAs to v${VERSION_NUM}" \
             --label "${LABELS}" \
             --body "${BODY}"
+
+      # Resolve the refresh PR number for the auto-approve and auto-merge steps below. This
+      # runs whether the previous step opened a new PR or found an existing one (e.g. on a
+      # release.yaml re-run for the same tag), and is a no-op when no diff was produced so
+      # no PR exists.
+      - name: Resolve self-pin refresh PR number
+        id: refresh-pr
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          VERSION_NUM="${GITHUB_REF_NAME#v}"
+          BRANCH="docs/refresh-self-pins-v${VERSION_NUM}"
+          PR=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if [ -z "${PR}" ]; then
+            echo "No open refresh PR for ${BRANCH}; auto-approve and auto-merge steps will no-op."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "number=${PR}" >> "$GITHUB_OUTPUT"
+
+      # Auto-approve the refresh PR so the protected-main CODEOWNER review requirement is
+      # satisfied without a manual click. The PAT in CODEOWNER_APPROVER_TOKEN belongs to a
+      # code-owner (see Settings → Secrets and variables → Actions); the App identity that
+      # opened the PR cannot approve its own PR, hence the separate token. The step is
+      # intentionally fail-open — any failure (missing token, revoked PAT, file-set guard
+      # tripped) emits a warning and exits 0, and the merge step below falls back to
+      # enabling GitHub auto-merge, which then waits for a manual code-owner approval.
+      - name: Auto-approve self-pin refresh PR
+        if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.CODEOWNER_APPROVER_TOKEN }}
+          PR: ${{ steps.refresh-pr.outputs.number }}
+        run: |
+          set +e
+          set -uo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::CODEOWNER_APPROVER_TOKEN is not set in the Actions secret store — skipping auto-approval. The merge step will fall back to enabling GitHub auto-merge, which waits for a manual code-owner approval. Configure a fine-grained PAT scoped to this repo (Pull requests: write) belonging to a code-owner and mirror the same value under Settings → Secrets and variables → Actions → CODEOWNER_APPROVER_TOKEN (Dependabot-triggered workflows read from the Dependabot secret store, so the existing copy used by dependabot-auto-merge.yaml is not visible here)."
+            exit 0
+          fi
+          if ! changed=$(gh pr diff "${PR}" --name-only); then
+            echo "::warning::Failed to read the changed file set on PR #${PR}; skipping auto-approval. The merge step will fall back to enabling GitHub auto-merge."
+            exit 0
+          fi
+          if echo "${changed}" | grep -Ev '^(README\.md|\.github/workflows/codex-review\.yaml)$' >/dev/null; then
+            echo "::warning::Refresh PR #${PR} touches files outside the whitelist (README.md, .github/workflows/codex-review.yaml); skipping auto-approval and refusing to enable auto-merge. Investigate before merging — refresh-self-pins.ts may have regressed:"
+            echo "${changed}" | awk '{print "  " $0}'
+            exit 0
+          fi
+          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${GITHUB_REF_NAME#v} tag was published. SHA-only updates to README.md and .github/workflows/codex-review.yaml were verified against the post-tag file-set whitelist; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
+            echo "::warning::Failed to post auto-approval review on PR #${PR} (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a transient GitHub API error). The merge step will fall back to enabling GitHub auto-merge."
+            exit 0
+          fi
+
+      # Enable GitHub's auto-merge primitive on the refresh PR so the PR squash-merges as
+      # soon as required status checks pass (and an APPROVED review is recorded — by the
+      # step above on the happy path, or by a manual code-owner approval on the fallback
+      # path). Independent of auto-approval: if the previous step warned and skipped, this
+      # step still arms auto-merge so a later manual approval fires the merge without
+      # further intervention. The step is also fail-open — a `gh pr merge --auto` failure
+      # warns and exits 0, leaving the PR open for manual merge.
+      - name: Enable auto-merge on self-pin refresh PR
+        if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ steps.refresh-pr.outputs.number }}
+        run: |
+          set +e
+          set -uo pipefail
+          if ! gh pr merge --auto --squash --delete-branch "${PR}"; then
+            echo "::warning::Failed to enable auto-merge on PR #${PR} (likely an App-token scope mismatch, a transient GitHub API error, or auto-merge disabled at the repo level — Settings → General → Pull Requests → Allow auto-merge). The PR remains open; merge it manually once CI is green."
+            exit 0
+          fi

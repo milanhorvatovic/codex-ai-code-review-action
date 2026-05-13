@@ -48,6 +48,14 @@ on:
       - opened
       - reopened
 
+# Queue concurrent runs on the same PR rather than cancel them. Label edits
+# are idempotent and run in 1-2 s; the post-edit recheck + rollback step
+# is non-trivial and should not be interrupted mid-flight by the next
+# `opened`/`reopened` event from `@dependabot recreate`.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 # `pull-requests: write` covers `gh pr edit --add-label/--remove-label` for
 # *existing* labels on a PR — same scope `actions/labeler` ships with. The
 # four release labels referenced below (`release: major/minor/patch/skip`)

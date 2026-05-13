@@ -151,6 +151,72 @@ describe("validateUnifiedDiff", () => {
     expect(result.errors[0]).not.toContain(".github/workflows/codex-review.yaml:");
   });
 
+  it("rejects swapping the action subpath while bumping the SHA", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.0.0`,
+      `+      uses: milanhorvatovic/codex-ai-code-review-action/review@${NEW_SHA} # v2.1.0`,
+      `       with:`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
+  });
+
+  it("rejects converting a top-level reference to a subpath one", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
+      `+      uses: milanhorvatovic/codex-ai-code-review-action/publish@${NEW_SHA} # v2.1.0`,
+      `       with:`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
+  });
+
+  it("rejects a non-semver tag comment on the new line", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
+      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # malicious-text`,
+      `       with:`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
+  });
+
+  it("accepts adding a v-prefixed tag comment to a previously bare self-pin", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA}`,
+      `+      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${NEW_SHA} # v2.1.0`,
+      `       with:`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("accepts a pre-release tag comment (v2.1.0-rc.1)", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
+      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0-rc.1`,
+      `       with:`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result).toEqual({ ok: true });
+  });
+
   it("returns ok for an empty diff", () => {
     expect(validateUnifiedDiff("")).toEqual({ ok: true });
   });

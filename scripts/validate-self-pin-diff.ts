@@ -1,22 +1,27 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+// Capture group 1 (`owner + optional /sub`) is preserved verbatim in the masked output
+// so changes to the action subpath (e.g. `.../prepare@SHA` → `.../review@SHA`) produce
+// different masked strings and fail validation. Only the SHA and the optional `# vSEMVER`
+// tag comment are absorbed by the placeholder. The tag comment is restricted to a
+// semver-shaped vX.Y.Z[-PRE] form so an attacker can't smuggle arbitrary trailing text
+// past the masker by formatting it as a `#`-prefixed comment.
 const SELF_PIN_PATTERN =
-  /milanhorvatovic\/codex-ai-code-review-action(?:\/[\w./-]+?)?@[0-9a-f]{40}(?:[ \t]*#[ \t]*[\w.+-]+)?/g;
+  /(milanhorvatovic\/codex-ai-code-review-action(?:\/[\w./-]+?)?)@[0-9a-f]{40}(?:[ \t]*#[ \t]*v\d+\.\d+\.\d+(?:-[\w.-]+)?)?/g;
 
 const SHA_TAG_NOTE_PATTERN =
   /# SHA corresponds to tag v\d+\.\d+\.\d+(?:-[\w.-]+)? — update when adopting a new release\./g;
 
-const SELF_PIN_MASK = "<self-pin>";
 const SHA_TAG_NOTE_MASK = "<sha-tag-note>";
 
 export type ValidateResult = { ok: true } | { ok: false; errors: string[] };
 
 function maskLine(line: string): { masked: string; matched: boolean } {
   let matched = false;
-  let masked = line.replace(SELF_PIN_PATTERN, () => {
+  let masked = line.replace(SELF_PIN_PATTERN, (_match, ownerSub: string) => {
     matched = true;
-    return SELF_PIN_MASK;
+    return `${ownerSub}@<sha-and-tag>`;
   });
   masked = masked.replace(SHA_TAG_NOTE_PATTERN, () => {
     matched = true;

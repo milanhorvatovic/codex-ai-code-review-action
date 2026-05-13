@@ -60,7 +60,16 @@ jobs:
             case "${GITHUB_REF_NAME}" in
               *-*) PRERELEASE_FLAG="--prerelease" ;;
             esac
-            gh release create "$GITHUB_REF_NAME" --notes-file "$NOTES_FILE" $PRERELEASE_FLAG
+            # `--title "$GITHUB_REF_NAME"` is explicit so GitHub's web UI does not fall back to
+            # the tagged commit's subject when rendering the release header. The squash-merge
+            # commit on `main` carries its own subject (today written by the maintainer at
+            # merge time); leaving `--title` unset made GitHub display that subject as the
+            # release name, which read awkwardly when the subject still carried the legacy
+            # `release: v…` prefix.
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file "$NOTES_FILE" \
+              $PRERELEASE_FLAG
           fi
 
       - name: Update major version tag

@@ -251,11 +251,11 @@ Use this path when `prepare-release.yaml` is broken or an urgent hotfix needs cu
 >
 > The release workflow runs on the tag push and creates the GitHub Release from the same `CHANGELOG.md` section.
 >
-> If the workflow is unavailable and you need to create the release by hand, extract the notes and pass them explicitly — do **not** use `--generate-notes`, which bypasses the CHANGELOG:
+> If the workflow is unavailable and you need to create the release by hand, extract the notes and pass them explicitly — do **not** use `--generate-notes`, which bypasses the CHANGELOG. Pass `--title vx.y.z` explicitly so the release header is pinned to the tag; without it, GitHub's web UI falls back to the tagged commit's subject for the release name, which couples the release page heading to whatever the squash-merge commit subject ended up being.
 >
 > ```bash
 > npx tsx scripts/extract-changelog-section.ts x.y.z > /tmp/notes.md
-> gh release create vx.y.z --notes-file /tmp/notes.md
+> gh release create vx.y.z --title vx.y.z --notes-file /tmp/notes.md
 > ```
 
 ## License

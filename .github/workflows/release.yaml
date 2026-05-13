@@ -147,6 +147,13 @@ jobs:
       # no PR exists. Fail-open like the steps that follow: a transient `gh pr list` outage
       # warns and emits an empty `number` output (the downstream steps then short-circuit
       # on `outputs.number != ''`) instead of aborting the whole release job.
+      #
+      # The query also filters to PRs whose head branch lives in this repo. `gh pr list
+      # --head BRANCH` matches by branch name only, so a fork PR named
+      # `docs/refresh-self-pins-vX.Y.Z` would otherwise be selectable here and the
+      # downstream auto-approve / auto-merge steps would target the wrong PR. The
+      # `isCrossRepository == false` predicate rejects any PR whose head ref is in a fork
+      # rather than the base repo itself.
       - name: Resolve self-pin refresh PR number
         id: refresh-pr
         if: ${{ !contains(github.ref_name, '-') }}
@@ -157,13 +164,13 @@ jobs:
           set -uo pipefail
           VERSION_NUM="${GITHUB_REF_NAME#v}"
           BRANCH="docs/refresh-self-pins-v${VERSION_NUM}"
-          if ! PR=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'); then
+          if ! PR=$(gh pr list --head "${BRANCH}" --state open --json number,isCrossRepository --jq 'first(.[] | select(.isCrossRepository == false) | .number) // empty'); then
             echo "::warning::Failed to query open refresh PRs for ${BRANCH} (likely a transient gh CLI or GitHub API outage); auto-approve and auto-merge steps will no-op for this run. The refresh PR — if one was opened — remains open for manual review."
             echo "number=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "${PR}" ]; then
-            echo "No open refresh PR for ${BRANCH}; auto-approve and auto-merge steps will no-op."
+            echo "No open refresh PR for ${BRANCH} on the base repo (cross-repo / fork PRs with the same branch name are ignored); auto-approve and auto-merge steps will no-op."
             echo "number=" >> "$GITHUB_OUTPUT"
             exit 0
           fi

@@ -479,6 +479,24 @@ describe("validateUnifiedDiff strict mode (expectedSha + expectedVersion)", () =
     expect(result).toEqual({ ok: true });
   });
 
+  it("rejects a placeholder-pin refresh whose added side drops the tag comment entirely", () => {
+    // Placeholder pins carry no release-specific SHA, so the tag comment is the only
+    // value tying a placeholder line to a release. Strict mode must require it; a
+    // refresh PR that strips `# vX.Y.Z` must not mask-equal the old line.
+    const hunk = [
+      `@@ -10,1 +10,1 @@`,
+      `-  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `+  uses: ${SELF_REPO}/prepare@<full-sha>`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff("docs/consumer-controls.md", hunk), {
+      expectedSha: NEW_SHA,
+      expectedVersion: EXPECTED_VERSION,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
+  });
+
   it("rejects a placeholder-pin tag refresh whose added tag does not match the expected version", () => {
     const hunk = [
       `@@ -10,1 +10,1 @@`,

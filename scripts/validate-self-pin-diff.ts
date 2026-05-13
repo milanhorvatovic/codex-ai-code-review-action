@@ -65,8 +65,13 @@ function buildStrictPatterns(sha: string, version: string): Patterns {
       `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@${shaEsc}(?:[ \\t]*#[ \\t]*v${verEsc})?`,
       "g",
     ),
+    // Placeholder pins carry no release-specific SHA — the `<full-sha>` token is
+    // literal on both sides — so the tag comment is the only value that must match
+    // the expected release. Make it mandatory in strict mode: a refresh PR that
+    // drops the trailing `# vX.Y.Z` would otherwise mask-equal the old line and
+    // pass the auto-approval guard without proving any version bump occurred.
     placeholderPin: new RegExp(
-      `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@<full-sha>(?:[ \\t]*#[ \\t]*v${verEsc})?`,
+      `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@<full-sha>[ \\t]*#[ \\t]*v${verEsc}`,
       "g",
     ),
     note: new RegExp(

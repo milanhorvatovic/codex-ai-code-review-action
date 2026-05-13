@@ -172,19 +172,31 @@ jobs:
       # Auto-approve the refresh PR so the protected-main CODEOWNER review requirement is
       # satisfied without a manual click. The PAT in CODEOWNER_APPROVER_TOKEN belongs to a
       # code-owner (see Settings → Secrets and variables → Actions); the App identity that
-      # opened the PR cannot approve its own PR, hence the separate token. The step is
-      # intentionally fail-open for transport failures (missing token, revoked PAT,
-      # transient API errors): those emit a warning and exit 0, and the merge step below
-      # still arms GitHub auto-merge, which then waits for a manual code-owner approval.
-      # Two safety-class failures emit `guard_ok=false` on `$GITHUB_OUTPUT`, which the
-      # merge step gates on, so the refresh PR never auto-merges — neither via an
-      # existing approval nor via a later manual one:
-      #   1. file-set whitelist trip — diff touches files other than the two known
+      # opened the PR cannot approve its own PR, hence the separate token.
+      #
+      # Posture: any path where a safety check did not run to completion emits
+      # `guard_ok=false` on `$GITHUB_OUTPUT`, which the merge step gates on, so the refresh
+      # PR never auto-merges — neither via an existing approval nor via a later manual
+      # one. The maintainer must merge by hand after reviewing the diff.
+      #
+      # `guard_ok=false` paths (safety check did not complete):
+      #   1. missing CODEOWNER_APPROVER_TOKEN — the action token cannot read the PR diff
+      #      under its own identity (the PAT is required for both approval and for
+      #      reading the diff under a code-owner identity);
+      #   2. `gh pr diff --name-only` transport failure — the file-set whitelist could
+      #      not be evaluated;
+      #   3. file-set whitelist trip — diff touches files other than the two known
       #      self-pin targets, indicating refresh-self-pins.ts pushed unexpected files;
-      #   2. unified-diff content check trip — diff includes line-level changes that are
+      #   4. `gh pr diff` transport failure — the unified-diff content check could
+      #      not be evaluated;
+      #   5. unified-diff content check trip — diff includes line-level changes that are
       #      not SHA-pin or SHA-tag-note bumps, indicating refresh-self-pins.ts smuggled
       #      non-SHA edits into a whitelisted file.
-      # On either trip, investigate refresh-self-pins.ts before merging by hand.
+      #
+      # `guard_ok` left unset (auto-merge still arms; manual approval can fire it):
+      #   - `gh pr review --approve` transport failure — both safety checks already
+      #     completed cleanly; only the approval post failed, so a manual code-owner
+      #     approval is safe to substitute.
       - name: Auto-approve self-pin refresh PR
         id: approve-refresh
         if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' }}
@@ -195,11 +207,13 @@ jobs:
           set +e
           set -uo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::CODEOWNER_APPROVER_TOKEN is not set in the Actions secret store — skipping auto-approval. The merge step will fall back to enabling GitHub auto-merge, which waits for a manual code-owner approval. Configure a fine-grained PAT scoped to this repo (Pull requests: write) belonging to a code-owner and mirror the same value under Settings → Secrets and variables → Actions → CODEOWNER_APPROVER_TOKEN (Dependabot-triggered workflows read from the Dependabot secret store, so the existing copy used by dependabot-auto-merge.yaml is not visible here)."
+            echo "::warning::CODEOWNER_APPROVER_TOKEN is not set in the Actions secret store — skipping auto-approval and refusing to enable auto-merge because the file-set whitelist and content checks cannot run without a code-owner identity. The PR remains open for a manual review + merge until the PAT is configured. Configure a fine-grained PAT scoped to this repo (Pull requests: write) belonging to a code-owner and mirror the same value under Settings → Secrets and variables → Actions → CODEOWNER_APPROVER_TOKEN (Dependabot-triggered workflows read from the Dependabot secret store, so the existing copy used by dependabot-auto-merge.yaml is not visible here)."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! changed=$(gh pr diff "${PR}" --name-only); then
-            echo "::warning::Failed to read the changed file set on PR #${PR}; skipping auto-approval. The merge step will fall back to enabling GitHub auto-merge."
+            echo "::warning::Failed to read the changed file set on PR #${PR} (likely a transient gh CLI or GitHub API outage); skipping auto-approval and refusing to enable auto-merge because the file-set whitelist could not be evaluated. The PR remains open for a manual review + merge."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if echo "${changed}" | grep -Ev '^(README\.md|\.github/workflows/codex-review\.yaml)$' >/dev/null; then
@@ -231,16 +245,17 @@ jobs:
 
       # Enable GitHub's auto-merge primitive on the refresh PR so the PR squash-merges as
       # soon as required status checks pass (and an APPROVED review is recorded — by the
-      # step above on the happy path, or by a manual code-owner approval on the fallback
-      # path). Independent of auto-approval for transport failures: if the previous step
-      # warned and skipped because of a missing/revoked token or a transient API error,
-      # this step still arms auto-merge so a later manual approval fires the merge without
-      # further intervention. The safety-class failures (file-set whitelist trip and
-      # unified-diff content-check trip) are the blocking ones — the approve step emits
-      # `guard_ok=false` on those paths and this step's condition below refuses to arm
-      # auto-merge, so a refresh PR with non-SHA changes or non-whitelisted files never
-      # auto-merges. The step itself is also fail-open — a `gh pr merge --auto` failure
-      # warns and exits 0, leaving the PR open for manual merge.
+      # step above on the happy path, or by a manual code-owner approval on the
+      # approval-transport-failure path). This step is conditioned on
+      # `steps.approve-refresh.outputs.guard_ok != 'false'`, which means any path in the
+      # approve step where a safety check did not run to completion (missing PAT, file-set
+      # query failure, file-set whitelist trip, content-diff fetch failure, content-check
+      # trip) refuses to arm auto-merge; the maintainer must merge by hand after reviewing
+      # the diff. Only an approval-post transport failure (safety checks completed
+      # cleanly, only the `gh pr review` call failed) leaves `guard_ok` unset so this
+      # step still arms auto-merge that a later manual approval can fire.
+      # The step itself is also fail-open — a `gh pr merge --auto` failure warns and
+      # exits 0, leaving the PR open for manual merge.
       - name: Enable auto-merge on self-pin refresh PR
         if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' && steps.approve-refresh.outputs.guard_ok != 'false' }}
         env:

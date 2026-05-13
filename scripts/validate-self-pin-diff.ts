@@ -21,10 +21,21 @@ const SELF_PIN_PATTERN_LOOSE = new RegExp(
   "g",
 );
 
+// Placeholder-pin form used in instructional examples: `@<full-sha> # vX.Y.Z`. The SHA
+// is the literal token `<full-sha>` and stays verbatim across refreshes; only the
+// trailing version label bumps. Capture group 1 (`owner + optional /sub`) is preserved
+// verbatim in the masked output for the same subpath-stability reason as
+// `SELF_PIN_PATTERN_LOOSE`.
+const SELF_PIN_PLACEHOLDER_PATTERN_LOOSE = new RegExp(
+  `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@<full-sha>(?:[ \\t]*#[ \\t]*v\\d+\\.\\d+\\.\\d+(?:-[\\w.-]+)?)?`,
+  "g",
+);
+
 const SHA_TAG_NOTE_PATTERN_LOOSE =
   /# SHA corresponds to tag v\d+\.\d+\.\d+(?:-[\w.-]+)? — update when adopting a new release\./g;
 
 const SELF_PIN_MASK = "<sha-and-tag>";
+const SELF_PIN_PLACEHOLDER_MASK = "<placeholder-and-tag>";
 const SHA_TAG_NOTE_MASK = "<sha-tag-note>";
 
 export type ValidateOptions = {
@@ -34,7 +45,7 @@ export type ValidateOptions = {
 
 export type ValidateResult = { ok: true } | { ok: false; errors: string[] };
 
-type Patterns = { selfPin: RegExp; note: RegExp };
+type Patterns = { selfPin: RegExp; placeholderPin: RegExp; note: RegExp };
 
 function buildStrictPatterns(sha: string, version: string): Patterns {
   if (!/^[0-9a-f]{40}$/.test(sha)) {
@@ -54,6 +65,10 @@ function buildStrictPatterns(sha: string, version: string): Patterns {
       `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@${shaEsc}(?:[ \\t]*#[ \\t]*v${verEsc})?`,
       "g",
     ),
+    placeholderPin: new RegExp(
+      `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@<full-sha>(?:[ \\t]*#[ \\t]*v${verEsc})?`,
+      "g",
+    ),
     note: new RegExp(
       `# SHA corresponds to tag v${verEsc} — update when adopting a new release\\.`,
       "g",
@@ -66,6 +81,10 @@ function maskLine(line: string, patterns: Patterns): { masked: string; matched: 
   let masked = line.replace(patterns.selfPin, (_match, ownerSub: string) => {
     matched = true;
     return `${ownerSub}@${SELF_PIN_MASK}`;
+  });
+  masked = masked.replace(patterns.placeholderPin, (_match, ownerSub: string) => {
+    matched = true;
+    return `${ownerSub}@${SELF_PIN_PLACEHOLDER_MASK}`;
   });
   masked = masked.replace(patterns.note, () => {
     matched = true;
@@ -84,6 +103,7 @@ export function validateUnifiedDiff(text: string, opts: ValidateOptions = {}): V
   }
   const loosePatterns: Patterns = {
     selfPin: SELF_PIN_PATTERN_LOOSE,
+    placeholderPin: SELF_PIN_PLACEHOLDER_PATTERN_LOOSE,
     note: SHA_TAG_NOTE_PATTERN_LOOSE,
   };
   const strictPatterns =

@@ -206,6 +206,46 @@ describe("validateUnifiedDiff", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it("accepts a placeholder-pin tag-comment refresh (`<full-sha>` form, tag only bumps)", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `  Replace \`<full-sha>\` with the resolved commit SHA:`,
+      `-  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `+  uses: ${SELF_REPO}/prepare@<full-sha> # v2.1.0`,
+      `  ...`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff("docs/consumer-controls.md", hunk));
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("rejects swapping the action subpath on a placeholder pin while bumping the tag", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `  ...`,
+      `-  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `+  uses: ${SELF_REPO}/review@<full-sha> # v2.1.0`,
+      `  ...`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff("docs/consumer-controls.md", hunk));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
+  });
+
+  it("rejects converting a placeholder pin to a real-SHA pin", () => {
+    const hunk = [
+      `@@ -10,3 +10,3 @@`,
+      `  ...`,
+      `-  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `+  uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
+      `  ...`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff("docs/consumer-controls.md", hunk));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
+  });
+
   it("accepts a pre-release tag comment (v2.1.0-rc.1)", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
@@ -424,6 +464,34 @@ describe("validateUnifiedDiff strict mode (expectedSha + expectedVersion)", () =
       expectedVersion: EXPECTED_VERSION,
     });
     expect(result).toEqual({ ok: true });
+  });
+
+  it("accepts a placeholder-pin tag refresh whose added version matches the expected version", () => {
+    const hunk = [
+      `@@ -10,1 +10,1 @@`,
+      `-  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `+  uses: ${SELF_REPO}/prepare@<full-sha> # v${EXPECTED_VERSION}`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff("docs/consumer-controls.md", hunk), {
+      expectedSha: NEW_SHA,
+      expectedVersion: EXPECTED_VERSION,
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("rejects a placeholder-pin tag refresh whose added tag does not match the expected version", () => {
+    const hunk = [
+      `@@ -10,1 +10,1 @@`,
+      `-  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `+  uses: ${SELF_REPO}/prepare@<full-sha> # v9.9.9`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff("docs/consumer-controls.md", hunk), {
+      expectedSha: NEW_SHA,
+      expectedVersion: EXPECTED_VERSION,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
   });
 
   it("rejects a SHA-tag-note refresh whose added version does not match the expected version", () => {

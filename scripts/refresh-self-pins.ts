@@ -9,6 +9,16 @@ const SELF_PIN_PATTERN = new RegExp(
   "g",
 );
 
+// Placeholder-pin form used in instructional examples: `@<full-sha> # vX.Y.Z`. The SHA
+// is the literal token `<full-sha>`, which readers replace; only the trailing version
+// label needs to track the current release. The `<full-sha>` token itself is preserved
+// verbatim so the prose around it ("Replace `<full-sha>` with the resolved 40-character
+// commit SHA") stays accurate.
+const SELF_PIN_PLACEHOLDER_PATTERN = new RegExp(
+  `(${SELF_REPO_REGEX_SOURCE})(\\/[\\w./-]+?)?@<full-sha>(?:[ \\t]*#[ \\t]*v\\d+\\.\\d+\\.\\d+(?:-[\\w.-]+)?)?`,
+  "g",
+);
+
 const SHA_TAG_NOTE = /(# SHA corresponds to tag )v\d+\.\d+\.\d+(?:-[\w.-]+)?( — update when adopting a new release\.)/g;
 
 function validateSelfPinInputs(version: string, sha: string): void {
@@ -38,6 +48,21 @@ export function rewriteAllSelfPins(content: string, version: string, sha: string
     .join("\n");
 }
 
+function rewritePlaceholderPinValidated(line: string, version: string): string {
+  return line.replace(SELF_PIN_PLACEHOLDER_PATTERN, (_match, owner: string, sub: string | undefined) => {
+    const subPath = sub ?? "";
+    return `${owner}${subPath}@<full-sha> # v${version}`;
+  });
+}
+
+export function rewriteAllPlaceholderPins(content: string, version: string): string {
+  parseVersion(version);
+  return content
+    .split("\n")
+    .map((line) => rewritePlaceholderPinValidated(line, version))
+    .join("\n");
+}
+
 export function rewriteShaTagNote(content: string, version: string): string {
   parseVersion(version);
   return content.replace(SHA_TAG_NOTE, (_match, prefix: string, suffix: string) => {
@@ -47,6 +72,7 @@ export function rewriteShaTagNote(content: string, version: string): string {
 
 export function refreshReadme(content: string, version: string, sha: string): string {
   let next = rewriteAllSelfPins(content, version, sha);
+  next = rewriteAllPlaceholderPins(next, version);
   next = rewriteShaTagNote(next, version);
   return next;
 }
@@ -55,12 +81,19 @@ export function refreshWorkflow(content: string, version: string, sha: string): 
   return rewriteAllSelfPins(content, version, sha);
 }
 
+export function refreshDoc(content: string, version: string, sha: string): string {
+  let next = rewriteAllSelfPins(content, version, sha);
+  next = rewriteAllPlaceholderPins(next, version);
+  return next;
+}
+
 export const SELF_PIN_TARGETS: ReadonlyArray<{
   path: string;
   refresh: (content: string, version: string, sha: string) => string;
 }> = [
   { path: "README.md", refresh: refreshReadme },
   { path: ".github/workflows/codex-review.yaml", refresh: refreshWorkflow },
+  { path: "docs/consumer-controls.md", refresh: refreshDoc },
 ];
 
 export type RunCliDeps = {

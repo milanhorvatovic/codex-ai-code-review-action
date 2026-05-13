@@ -122,8 +122,14 @@ jobs:
           else
             git push origin "${BRANCH}"
           fi
-          if gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number' | grep -q '^[0-9]'; then
-            echo "Refresh PR for ${BRANCH} already open; leaving it as-is."
+          # Scope the existing-PR check to refresh-class PRs only: same repo (`gh pr list`
+          # matches `--head BRANCH` across forks too, so a fork PR with the deterministic
+          # refresh branch name would otherwise trick this step into thinking a refresh PR
+          # already exists and skip creating the base-repo PR) and `--base main` (a stale
+          # same-repo PR with the same branch name targeting a different base must not
+          # short-circuit creation of the main-base refresh PR).
+          if gh pr list --head "${BRANCH}" --base main --state open --json number,isCrossRepository --jq 'first(.[] | select(.isCrossRepository == false) | .number) // empty' | grep -q '^[0-9]'; then
+            echo "Refresh PR for ${BRANCH} (base main, same repo) already open; leaving it as-is."
             exit 0
           fi
           LABELS="release: patch,documentation"
@@ -148,12 +154,13 @@ jobs:
       # warns and emits an empty `number` output (the downstream steps then short-circuit
       # on `outputs.number != ''`) instead of aborting the whole release job.
       #
-      # The query also filters to PRs whose head branch lives in this repo. `gh pr list
-      # --head BRANCH` matches by branch name only, so a fork PR named
+      # The query filters to refresh-class PRs only — same repo (`gh pr list --head BRANCH`
+      # matches by branch name across forks too, so a fork PR named
       # `docs/refresh-self-pins-vX.Y.Z` would otherwise be selectable here and the
-      # downstream auto-approve / auto-merge steps would target the wrong PR. The
-      # `isCrossRepository == false` predicate rejects any PR whose head ref is in a fork
-      # rather than the base repo itself.
+      # downstream auto-approve / auto-merge steps would target the wrong PR) and
+      # `--base main` (a stale same-repo PR with the same head branch targeting a different
+      # base must not be selected as the main-base refresh PR). `isCrossRepository == false`
+      # is the cross-repo predicate; `--base main` is the base-ref predicate.
       - name: Resolve self-pin refresh PR number
         id: refresh-pr
         if: ${{ !contains(github.ref_name, '-') }}
@@ -164,13 +171,13 @@ jobs:
           set -uo pipefail
           VERSION_NUM="${GITHUB_REF_NAME#v}"
           BRANCH="docs/refresh-self-pins-v${VERSION_NUM}"
-          if ! PR=$(gh pr list --head "${BRANCH}" --state open --json number,isCrossRepository --jq 'first(.[] | select(.isCrossRepository == false) | .number) // empty'); then
+          if ! PR=$(gh pr list --head "${BRANCH}" --base main --state open --json number,isCrossRepository --jq 'first(.[] | select(.isCrossRepository == false) | .number) // empty'); then
             echo "::warning::Failed to query open refresh PRs for ${BRANCH} (likely a transient gh CLI or GitHub API outage); auto-approve and auto-merge steps will no-op for this run. The refresh PR — if one was opened — remains open for manual review."
             echo "number=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "${PR}" ]; then
-            echo "No open refresh PR for ${BRANCH} on the base repo (cross-repo / fork PRs with the same branch name are ignored); auto-approve and auto-merge steps will no-op."
+            echo "No open main-base refresh PR for ${BRANCH} on the base repo (cross-repo / fork PRs and PRs targeting a non-main base are ignored); auto-approve and auto-merge steps will no-op."
             echo "number=" >> "$GITHUB_OUTPUT"
             exit 0
           fi

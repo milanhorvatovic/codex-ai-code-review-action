@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { SELF_REPO } from "./self-repo.js";
 import { runCli, validateUnifiedDiff } from "./validate-self-pin-diff.js";
 
 const OLD_SHA = "af72a5bd7330432cee97137b04d04edebde80149";
@@ -20,8 +21,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -42,13 +43,13 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       step-a:`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
       `       with:`,
       `@@ -42,3 +42,3 @@`,
       `       step-b:`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action/review@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action/review@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}/review@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}/review@${NEW_SHA} # v2.1.0`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -59,8 +60,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0 # smuggled comment`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0 # smuggled comment`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -101,8 +102,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,4 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
       `+      env: { SECRET: leak }`,
       `       with:`,
     ].join("\n");
@@ -129,8 +130,8 @@ describe("validateUnifiedDiff", () => {
     const okHunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
       `       with:`,
     ].join("\n");
     const badHunk = [
@@ -155,8 +156,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action/review@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}/review@${NEW_SHA} # v2.1.0`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -169,8 +170,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action/publish@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}/publish@${NEW_SHA} # v2.1.0`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -183,8 +184,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # malicious-text`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # malicious-text`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -197,8 +198,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA}`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}/prepare@${OLD_SHA}`,
+      `+      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -209,8 +210,8 @@ describe("validateUnifiedDiff", () => {
     const hunk = [
       `@@ -10,3 +10,3 @@`,
       `       runs-on: ubuntu-latest`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0-rc.1`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0-rc.1`,
       `       with:`,
     ].join("\n");
     const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
@@ -230,8 +231,8 @@ describe("runCli", () => {
       `--- a/README.md`,
       `+++ b/README.md`,
       `@@ -1,1 +1,1 @@`,
-      `-      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-      `+      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
     ].join("\n");
     const exit = runCli({
       readInput: () => text,

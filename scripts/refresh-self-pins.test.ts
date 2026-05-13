@@ -8,29 +8,30 @@ import {
   rewriteShaTagNote,
   runCli,
 } from "./refresh-self-pins.js";
+import { SELF_REPO } from "./self-repo.js";
 
 const NEW_SHA = "1111111111111111111111111111111111111111";
 const OLD_SHA = "af72a5bd7330432cee97137b04d04edebde80149";
 
 describe("rewriteSelfPin", () => {
   it("rewrites a top-level self-reference", () => {
-    const line = `      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`;
+    const line = `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`;
     expect(rewriteSelfPin(line, "2.1.0", NEW_SHA)).toBe(
-      `      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
+      `      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
     );
   });
 
   it("rewrites a sub-action self-reference", () => {
-    const line = `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.0.0`;
+    const line = `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.0.0`;
     expect(rewriteSelfPin(line, "2.1.0", NEW_SHA)).toBe(
-      `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${NEW_SHA} # v2.1.0`,
+      `      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
     );
   });
 
   it("appends a tag comment when none was present", () => {
-    const line = `      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA}`;
+    const line = `      uses: ${SELF_REPO}@${OLD_SHA}`;
     expect(rewriteSelfPin(line, "2.1.0", NEW_SHA)).toBe(
-      `      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
+      `      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
     );
   });
 
@@ -40,7 +41,7 @@ describe("rewriteSelfPin", () => {
   });
 
   it("leaves @v2-style floating tags untouched", () => {
-    const line = `      uses: milanhorvatovic/codex-ai-code-review-action@v2`;
+    const line = `      uses: ${SELF_REPO}@v2`;
     expect(rewriteSelfPin(line, "2.1.0", NEW_SHA)).toBe(line);
   });
 
@@ -61,9 +62,9 @@ describe("rewriteAllSelfPins", () => {
   it("rewrites every self-reference and leaves others untouched", () => {
     const content = [
       `      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2`,
-      `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.0.0`,
-      `      uses: milanhorvatovic/codex-ai-code-review-action/review@${OLD_SHA} # v2.0.0`,
-      `      uses: milanhorvatovic/codex-ai-code-review-action/publish@${OLD_SHA} # v2.0.0`,
+      `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.0.0`,
+      `      uses: ${SELF_REPO}/review@${OLD_SHA} # v2.0.0`,
+      `      uses: ${SELF_REPO}/publish@${OLD_SHA} # v2.0.0`,
     ].join("\n");
     const result = rewriteAllSelfPins(content, "2.1.0", NEW_SHA);
     expect(result.split("\n")[0]).toContain("actions/checkout@");
@@ -105,7 +106,7 @@ describe("refreshReadme", () => {
     const content = [
       "# Project",
       "",
-      `      uses: milanhorvatovic/codex-ai-code-review-action/publish@${OLD_SHA} # v2.0.0`,
+      `      uses: ${SELF_REPO}/publish@${OLD_SHA} # v2.0.0`,
       `        # SHA corresponds to tag v2.0.0 — update when adopting a new release.`,
       "",
       "## Architecture",
@@ -121,9 +122,9 @@ describe("refreshReadme", () => {
 describe("refreshWorkflow", () => {
   it("rewrites every self-reference SHA and tag comment in a workflow file", () => {
     const content = [
-      `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.1.0-pre`,
-      `      uses: milanhorvatovic/codex-ai-code-review-action/review@${OLD_SHA} # v2.1.0-pre`,
-      `      uses: milanhorvatovic/codex-ai-code-review-action/publish@${OLD_SHA} # v2.1.0-pre`,
+      `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`,
+      `      uses: ${SELF_REPO}/review@${OLD_SHA} # v2.1.0-pre`,
+      `      uses: ${SELF_REPO}/publish@${OLD_SHA} # v2.1.0-pre`,
     ].join("\n");
     const result = refreshWorkflow(content, "2.1.0", NEW_SHA);
     expect(result).not.toContain(OLD_SHA);
@@ -177,8 +178,8 @@ describe("runCli", () => {
   it("returns 0 and writes both targets when both have outdated SHAs", () => {
     const stub: Stub = {
       files: {
-        [README_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-        [WORKFLOW_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.1.0-pre`,
+        [README_PATH]: `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+        [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`,
       },
       writes: [],
       stdout: [],
@@ -194,8 +195,8 @@ describe("runCli", () => {
   it("writes only the workflow file when README is already up to date", () => {
     const stub: Stub = {
       files: {
-        [README_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
-        [WORKFLOW_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.1.0-pre`,
+        [README_PATH]: `      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+        [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`,
       },
       writes: [],
       stdout: [],
@@ -210,8 +211,8 @@ describe("runCli", () => {
   it("writes only README when the workflow file is already up to date", () => {
     const stub: Stub = {
       files: {
-        [README_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
-        [WORKFLOW_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${NEW_SHA} # v2.1.0`,
+        [README_PATH]: `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+        [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
       },
       writes: [],
       stdout: [],
@@ -226,8 +227,8 @@ describe("runCli", () => {
   it("returns 0 without writing when no edits are required across all targets", () => {
     const stub: Stub = {
       files: {
-        [README_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action@${NEW_SHA} # v2.1.0`,
-        [WORKFLOW_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${NEW_SHA} # v2.1.0`,
+        [README_PATH]: `      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+        [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
       },
       writes: [],
       stdout: [],
@@ -261,7 +262,7 @@ describe("runCli", () => {
   it("does not write any target when a later read fails", () => {
     const stub: Stub = {
       files: {
-        [README_PATH]: `      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`,
+        [README_PATH]: `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
         // WORKFLOW_PATH intentionally absent so reading it throws after README has been refreshed.
       },
       writes: [],
@@ -274,8 +275,8 @@ describe("runCli", () => {
   });
 
   it("rolls back earlier writes and the in-flight file when a later write throws", () => {
-    const readmeOriginal = `      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`;
-    const workflowOriginal = `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.1.0-pre`;
+    const readmeOriginal = `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`;
+    const workflowOriginal = `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`;
     const stub: Stub = {
       files: { [README_PATH]: readmeOriginal, [WORKFLOW_PATH]: workflowOriginal },
       writes: [],
@@ -316,8 +317,8 @@ describe("runCli", () => {
   });
 
   it("surfaces the original write error when rollback writes also fail", () => {
-    const readmeOriginal = `      uses: milanhorvatovic/codex-ai-code-review-action@${OLD_SHA} # v2.0.0`;
-    const workflowOriginal = `      uses: milanhorvatovic/codex-ai-code-review-action/prepare@${OLD_SHA} # v2.1.0-pre`;
+    const readmeOriginal = `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`;
+    const workflowOriginal = `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`;
     const stub: Stub = {
       files: { [README_PATH]: readmeOriginal, [WORKFLOW_PATH]: workflowOriginal },
       writes: [],

@@ -73,6 +73,12 @@ export function validateUnifiedDiff(text: string): ValidateResult {
       while (i < lines.length) {
         const next = lines[i];
         if (next === undefined) break;
+        // Skip `\ No newline at end of file` markers so an EOF SHA refresh whose removed
+        // or added side lacks a trailing newline still pairs minus/plus blocks 1:1.
+        if (next.startsWith("\\")) {
+          i++;
+          continue;
+        }
         if (!next.startsWith("-") || next.startsWith("--- ")) break;
         minusBlock.push(next.slice(1));
         i++;
@@ -81,6 +87,10 @@ export function validateUnifiedDiff(text: string): ValidateResult {
       while (i < lines.length) {
         const next = lines[i];
         if (next === undefined) break;
+        if (next.startsWith("\\")) {
+          i++;
+          continue;
+        }
         if (!next.startsWith("+") || next.startsWith("+++ ")) break;
         plusBlock.push(next.slice(1));
         i++;

@@ -221,6 +221,43 @@ describe("validateUnifiedDiff", () => {
   it("returns ok for an empty diff", () => {
     expect(validateUnifiedDiff("")).toEqual({ ok: true });
   });
+
+  it("accepts a SHA-only refresh whose removed side lacks a trailing newline", () => {
+    const hunk = [
+      `@@ -10,2 +10,2 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `\\ No newline at end of file`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("accepts a SHA-only refresh whose added side lacks a trailing newline", () => {
+    const hunk = [
+      `@@ -10,2 +10,2 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+      `\\ No newline at end of file`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("accepts a SHA-only refresh where both sides lack a trailing newline", () => {
+    const hunk = [
+      `@@ -10,2 +10,2 @@`,
+      `       runs-on: ubuntu-latest`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `\\ No newline at end of file`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+      `\\ No newline at end of file`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk));
+    expect(result).toEqual({ ok: true });
+  });
 });
 
 describe("runCli", () => {

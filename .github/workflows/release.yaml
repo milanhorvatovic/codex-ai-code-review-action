@@ -169,10 +169,15 @@ jobs:
       # intentionally fail-open for transport failures (missing token, revoked PAT,
       # transient API errors): those emit a warning and exit 0, and the merge step below
       # still arms GitHub auto-merge, which then waits for a manual code-owner approval.
-      # The file-set whitelist trip is the one exception: it emits `guard_ok=false` on
-      # `$GITHUB_OUTPUT`, which the merge step gates on, so a refresh PR that touches
-      # non-whitelisted files never auto-merges — neither via an existing approval nor via
-      # a later manual one. Investigate refresh-self-pins.ts before merging it by hand.
+      # Two safety-class failures emit `guard_ok=false` on `$GITHUB_OUTPUT`, which the
+      # merge step gates on, so the refresh PR never auto-merges — neither via an
+      # existing approval nor via a later manual one:
+      #   1. file-set whitelist trip — diff touches files other than the two known
+      #      self-pin targets, indicating refresh-self-pins.ts pushed unexpected files;
+      #   2. unified-diff content check trip — diff includes line-level changes that are
+      #      not SHA-pin or SHA-tag-note bumps, indicating refresh-self-pins.ts smuggled
+      #      non-SHA edits into a whitelisted file.
+      # On either trip, investigate refresh-self-pins.ts before merging by hand.
       - name: Auto-approve self-pin refresh PR
         id: approve-refresh
         if: ${{ !contains(github.ref_name, '-') && steps.refresh-pr.outputs.number != '' }}
@@ -196,7 +201,23 @@ jobs:
             echo "guard_ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${GITHUB_REF_NAME#v} tag was published. SHA-only updates to README.md and .github/workflows/codex-review.yaml were verified against the post-tag file-set whitelist; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
+          # Filename whitelisting is not enough — `.github/workflows/codex-review.yaml` is
+          # executable CI config. Validate that every changed line in the PR's diff is
+          # either a self-pin SHA bump or a SHA-tag-note version bump, with all other
+          # characters identical between the removed and added sides. A regression in
+          # refresh-self-pins.ts that smuggles non-SHA edits into a whitelisted file
+          # trips this check and blocks both auto-approval and auto-merge.
+          if ! diff_text=$(gh pr diff "${PR}"); then
+            echo "::warning::Failed to read the unified diff for PR #${PR}; skipping auto-approval and refusing to enable auto-merge."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! printf '%s' "${diff_text}" | npx --no-install tsx scripts/validate-self-pin-diff.ts; then
+            echo "::warning::Refresh PR #${PR} diff contains changes outside the expected SHA-pin / tag-comment refresh; skipping auto-approval and refusing to enable auto-merge. Investigate before merging — refresh-self-pins.ts may have regressed."
+            echo "guard_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${GITHUB_REF_NAME#v} tag was published. SHA-only updates to README.md and .github/workflows/codex-review.yaml were verified against the post-tag file-set whitelist and a unified-diff content check that asserts every changed line is a self-pin SHA bump or a SHA-tag-note version bump; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
             echo "::warning::Failed to post auto-approval review on PR #${PR} (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a transient GitHub API error). The merge step will fall back to enabling GitHub auto-merge."
             exit 0
           fi
@@ -207,9 +228,10 @@ jobs:
       # path). Independent of auto-approval for transport failures: if the previous step
       # warned and skipped because of a missing/revoked token or a transient API error,
       # this step still arms auto-merge so a later manual approval fires the merge without
-      # further intervention. The file-set whitelist trip is the only blocking failure
-      # — the approve step emits `guard_ok=false` on that path and this step's condition
-      # below refuses to arm auto-merge, so a refresh PR with non-whitelisted files never
+      # further intervention. The safety-class failures (file-set whitelist trip and
+      # unified-diff content-check trip) are the blocking ones — the approve step emits
+      # `guard_ok=false` on those paths and this step's condition below refuses to arm
+      # auto-merge, so a refresh PR with non-SHA changes or non-whitelisted files never
       # auto-merges. The step itself is also fail-open — a `gh pr merge --auto` failure
       # warns and exits 0, leaving the PR open for manual merge.
       - name: Enable auto-merge on self-pin refresh PR

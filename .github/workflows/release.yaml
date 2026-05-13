@@ -270,7 +270,7 @@ jobs:
             echo "guard_ok=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${VERSION_NUM} tag was published. SHA-only updates to README.md, .github/workflows/codex-review.yaml, and docs/consumer-controls.md were verified against the post-tag file-set whitelist and a strict unified-diff content check that asserts every added self-pin references exactly ${TAG_SHA} and every added SHA-tag-note references exactly v${VERSION_NUM}; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
+          if ! gh pr review --approve --body "Auto-approved by release.yaml after the v${VERSION_NUM} tag was published. SHA-only updates to README.md, .github/workflows/codex-review.yaml, and docs/consumer-controls.md were verified against the post-tag file-set whitelist and a strict unified-diff content check that asserts every added real-SHA self-pin references exactly ${TAG_SHA} with a matching \`# v${VERSION_NUM}\` tag comment, every added placeholder self-pin remains \`@<full-sha>\` with a mandatory \`# v${VERSION_NUM}\` tag comment, and every added SHA-tag-note references exactly v${VERSION_NUM}; the protected-main CODEOWNER requirement is satisfied by this PAT-driven approval, which belongs to a code-owner." "${PR}"; then
             echo "::warning::Failed to post auto-approval review on PR #${PR} (likely a revoked or insufficiently-scoped CODEOWNER_APPROVER_TOKEN, or a transient GitHub API error). The merge step will fall back to enabling GitHub auto-merge."
             exit 0
           fi

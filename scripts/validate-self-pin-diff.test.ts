@@ -260,6 +260,112 @@ describe("validateUnifiedDiff", () => {
   });
 });
 
+describe("validateUnifiedDiff diff-section hardening", () => {
+  it("rejects a file-mode change (old mode / new mode headers)", () => {
+    const text = [
+      `diff --git a/.github/workflows/codex-review.yaml b/.github/workflows/codex-review.yaml`,
+      `old mode 100644`,
+      `new mode 100755`,
+      `index abcdef1..abcdef2 100755`,
+      `--- a/.github/workflows/codex-review.yaml`,
+      `+++ b/.github/workflows/codex-review.yaml`,
+      `@@ -10,1 +10,1 @@`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+    ].join("\n");
+    const result = validateUnifiedDiff(text);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("file mode change is not a SHA-only refresh");
+  });
+
+  it("rejects a new-file diff section (new file mode header)", () => {
+    const text = [
+      `diff --git a/.github/workflows/new.yaml b/.github/workflows/new.yaml`,
+      `new file mode 100644`,
+      `index 0000000..abcdef1`,
+      `--- /dev/null`,
+      `+++ b/.github/workflows/new.yaml`,
+      `@@ -0,0 +1,1 @@`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+    ].join("\n");
+    const result = validateUnifiedDiff(text);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("file mode change is not a SHA-only refresh");
+  });
+
+  it("rejects a file rename diff section", () => {
+    const text = [
+      `diff --git a/README.md b/RENAMED.md`,
+      `similarity index 100%`,
+      `rename from README.md`,
+      `rename to RENAMED.md`,
+    ].join("\n");
+    const result = validateUnifiedDiff(text);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("file rename/copy is not a SHA-only refresh");
+  });
+
+  it("rejects a binary diff (`Binary files ... differ`)", () => {
+    const text = [
+      `diff --git a/assets/logo.png b/assets/logo.png`,
+      `index abcdef1..abcdef2 100644`,
+      `Binary files a/assets/logo.png and b/assets/logo.png differ`,
+    ].join("\n");
+    const result = validateUnifiedDiff(text);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("binary patch is not a SHA-only refresh");
+  });
+
+  it("rejects a GIT binary patch diff section", () => {
+    const text = [
+      `diff --git a/assets/logo.png b/assets/logo.png`,
+      `index abcdef1..abcdef2 100644`,
+      `GIT binary patch`,
+      `literal 12`,
+      `Mc$_NA01R$#mH+?%`,
+    ].join("\n");
+    const result = validateUnifiedDiff(text);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("binary patch is not a SHA-only refresh");
+  });
+
+  it("rejects a header-only diff section that has no hunks at all", () => {
+    const text = [
+      `diff --git a/.github/workflows/codex-review.yaml b/.github/workflows/codex-review.yaml`,
+      `index abcdef1..abcdef2 100644`,
+    ].join("\n");
+    const result = validateUnifiedDiff(text);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("diff section has no hunks");
+  });
+
+  it("rejects when a no-hunk section precedes a valid SHA-only section", () => {
+    const text = [
+      `diff --git a/assets/logo.png b/assets/logo.png`,
+      `index abcdef1..abcdef2 100644`,
+      `diff --git a/.github/workflows/codex-review.yaml b/.github/workflows/codex-review.yaml`,
+      `index abcdef1..abcdef2 100644`,
+      `--- a/.github/workflows/codex-review.yaml`,
+      `+++ b/.github/workflows/codex-review.yaml`,
+      `@@ -10,1 +10,1 @@`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+    ].join("\n");
+    const result = validateUnifiedDiff(text);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("diff section has no hunks");
+    // The valid second section should not contribute additional errors.
+    expect(result.errors.length).toBe(1);
+  });
+});
+
 describe("validateUnifiedDiff strict mode (expectedSha + expectedVersion)", () => {
   const EXPECTED_VERSION = "2.1.0";
 

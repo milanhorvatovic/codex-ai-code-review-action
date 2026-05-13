@@ -96,19 +96,68 @@ export function validateUnifiedDiff(text: string, opts: ValidateOptions = {}): V
   const lines = text.split("\n");
   let inHunk = false;
   let currentPath = "<unknown>";
+  let inDiffSection = false;
+  let sectionHasHunk = false;
   let i = 0;
+
+  const flushSectionWithoutHunk = () => {
+    if (inDiffSection && !sectionHasHunk) {
+      errors.push(
+        `${currentPath}: diff section has no hunks (binary patch or header-only change is not a SHA-only refresh)`,
+      );
+    }
+  };
+
   while (i < lines.length) {
     const line = lines[i];
     if (line === undefined) break;
     if (line.startsWith("diff --git ")) {
+      flushSectionWithoutHunk();
       const match = /^diff --git a\/(.+?) b\//.exec(line);
       currentPath = match?.[1] ?? "<unknown>";
       inHunk = false;
+      inDiffSection = true;
+      sectionHasHunk = false;
       i++;
       continue;
     }
     if (line.startsWith("@@")) {
       inHunk = true;
+      sectionHasHunk = true;
+      i++;
+      continue;
+    }
+    // Reject any header indicating that the diff section carries something other than a
+    // line-level content edit: file-mode changes (which alter executability of a
+    // workflow file), file creations / deletions, renames / copies, and binary patches.
+    if (
+      line.startsWith("old mode ") ||
+      line.startsWith("new mode ") ||
+      line.startsWith("new file mode ") ||
+      line.startsWith("deleted file mode ")
+    ) {
+      errors.push(
+        `${currentPath}: file mode change is not a SHA-only refresh: ${line}`,
+      );
+      i++;
+      continue;
+    }
+    if (
+      line.startsWith("rename from ") ||
+      line.startsWith("rename to ") ||
+      line.startsWith("copy from ") ||
+      line.startsWith("copy to ")
+    ) {
+      errors.push(
+        `${currentPath}: file rename/copy is not a SHA-only refresh: ${line}`,
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) {
+      errors.push(
+        `${currentPath}: binary patch is not a SHA-only refresh: ${line}`,
+      );
       i++;
       continue;
     }
@@ -116,6 +165,8 @@ export function validateUnifiedDiff(text: string, opts: ValidateOptions = {}): V
       line.startsWith("index ") ||
       line.startsWith("--- ") ||
       line.startsWith("+++ ") ||
+      line.startsWith("similarity index ") ||
+      line.startsWith("dissimilarity index ") ||
       line.startsWith("\\")
     ) {
       i++;
@@ -184,6 +235,7 @@ export function validateUnifiedDiff(text: string, opts: ValidateOptions = {}): V
     }
     i++;
   }
+  flushSectionWithoutHunk();
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true };
 }

@@ -29,7 +29,7 @@ Every `uses:` reference to this action in your workflow must use a 40-character 
 
 **Why:** SHA pinning is GitHub's recommended supply-chain control for third-party actions. A mutable tag like `@v2` is a maintainer-account-controlled reference that can be moved at any time; a SHA freezes the exact code you reviewed, including the transitive `openai/codex-action` pin in [`review/action.yaml`](../review/action.yaml).
 
-**Example.** Resolve the SHA for the release tag you want to adopt, then pin all three sub-actions to that single SHA. Replace `<tag>` with the release (e.g. `v2.1.0`) and `<full-sha>` with the resolved 40-character commit SHA:
+**Example.** Resolve the SHA for the release tag you want to adopt, then pin all three sub-actions to that single SHA. Replace `<tag>` with the release tag you want to pin and `<full-sha>` with the resolved 40-character commit SHA:
 
 ```bash
 gh api repos/milanhorvatovic/codex-ai-code-review-action/commits/<tag> --jq '.sha'
@@ -42,7 +42,7 @@ gh api repos/milanhorvatovic/codex-ai-code-review-action/commits/<tag> --jq '.sh
 - uses: milanhorvatovic/codex-ai-code-review-action/publish@<full-sha> # v2.1.0
 ```
 
-The `# v2.1.0` trailing comment is for human readers; pin verification reads the SHA, not the comment. Bumping to a new release is a one-line edit per `uses:` line plus a re-run of the `gh api` command.
+The trailing `# vX.Y.Z` comment is for human readers; pin verification reads the SHA, not the comment. Bumping to a new release is a one-line edit per `uses:` line plus a re-run of the `gh api` command.
 
 **How to apply:** see [Pinning the action](../README.md#pinning-the-action) for the full convenient-vs-immutable comparison and the transitive-pin guarantee, and the [Production workflow example](../README.md#production-workflow-example) for a complete workflow that has all three sub-actions pinned to the same SHA in context.
 

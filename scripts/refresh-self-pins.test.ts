@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  refreshDoc,
   refreshReadme,
   refreshWorkflow,
+  rewriteAllPlaceholderPins,
   rewriteAllSelfPins,
   rewriteSelfPin,
   rewriteShaTagNote,
@@ -73,6 +75,48 @@ describe("rewriteAllSelfPins", () => {
   });
 });
 
+describe("rewriteAllPlaceholderPins", () => {
+  it("bumps the trailing tag comment on a `<full-sha>` placeholder pin", () => {
+    const line = `  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`;
+    expect(rewriteAllPlaceholderPins(line, "2.1.0")).toBe(
+      `  uses: ${SELF_REPO}/prepare@<full-sha> # v2.1.0`,
+    );
+  });
+
+  it("rewrites every placeholder self-reference in a multi-line block", () => {
+    const content = [
+      `  uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `- uses: ${SELF_REPO}/review@<full-sha> # v2.0.0`,
+      `- uses: ${SELF_REPO}/publish@<full-sha> # v2.0.0`,
+    ].join("\n");
+    const result = rewriteAllPlaceholderPins(content, "2.1.0");
+    expect((result.match(/# v2\.1\.0(?!-)/g) ?? []).length).toBe(3);
+    expect(result).not.toContain("# v2.0.0");
+    expect((result.match(/@<full-sha>/g) ?? []).length).toBe(3);
+  });
+
+  it("appends a tag comment when none was present on a placeholder pin", () => {
+    const line = `  uses: ${SELF_REPO}/prepare@<full-sha>`;
+    expect(rewriteAllPlaceholderPins(line, "2.1.0")).toBe(
+      `  uses: ${SELF_REPO}/prepare@<full-sha> # v2.1.0`,
+    );
+  });
+
+  it("leaves prose mentions of `<full-sha>` (no owner prefix) untouched", () => {
+    const line = "Replace `<full-sha>` with its commit SHA.";
+    expect(rewriteAllPlaceholderPins(line, "2.1.0")).toBe(line);
+  });
+
+  it("leaves third-party fork-mirror placeholder pins untouched", () => {
+    const line = "  uses: <org>/codex-ai-code-review-action-fork/prepare@<full-sha> # v2.1.0-rc.1";
+    expect(rewriteAllPlaceholderPins(line, "2.1.0")).toBe(line);
+  });
+
+  it("rejects a malformed version string", () => {
+    expect(() => rewriteAllPlaceholderPins("noop", "v2.1.0")).toThrow(/Strip the leading 'v'/);
+  });
+});
+
 describe("rewriteShaTagNote", () => {
   it("updates the inline 'SHA corresponds to tag vX.Y.Z' note", () => {
     const content = "        # SHA corresponds to tag v2.0.0 — update when adopting a new release.";
@@ -117,6 +161,38 @@ describe("refreshReadme", () => {
     expect(result).toContain("# SHA corresponds to tag v2.1.0 —");
     expect(result).toContain("## Architecture");
   });
+
+  it("bumps placeholder-pin tag comments alongside real-SHA pins", () => {
+    const content = [
+      `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.0.0`,
+      "",
+      `- uses: ${SELF_REPO}/review@<full-sha> # v2.0.0`,
+      `- uses: ${SELF_REPO}/publish@<full-sha> # v2.0.0`,
+    ].join("\n");
+    const result = refreshReadme(content, "2.1.0", NEW_SHA);
+    expect(result).toContain(`@${NEW_SHA} # v2.1.0`);
+    expect(result).toContain(`@<full-sha> # v2.1.0`);
+    expect(result).not.toContain("v2.0.0");
+  });
+});
+
+describe("refreshDoc", () => {
+  it("rewrites both real-SHA and placeholder pins in a docs page", () => {
+    const content = [
+      `- uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+      `- uses: ${SELF_REPO}/review@<full-sha> # v2.0.0`,
+      `      uses: ${SELF_REPO}/publish@${OLD_SHA} # v2.0.0`,
+    ].join("\n");
+    const result = refreshDoc(content, "2.1.0", NEW_SHA);
+    expect((result.match(/@<full-sha> # v2\.1\.0(?!-)/g) ?? []).length).toBe(2);
+    expect(result).toContain(`@${NEW_SHA} # v2.1.0`);
+    expect(result).not.toContain("v2.0.0");
+  });
+
+  it("does not touch the SHA-tag-note phrase (only README uses that note)", () => {
+    const content = "# SHA corresponds to tag v2.0.0 — update when adopting a new release.";
+    expect(refreshDoc(content, "2.1.0", NEW_SHA)).toBe(content);
+  });
 });
 
 describe("refreshWorkflow", () => {
@@ -154,6 +230,7 @@ describe("runCli", () => {
 
   const README_PATH = "README.md";
   const WORKFLOW_PATH = ".github/workflows/codex-review.yaml";
+  const DOC_PATH = "docs/consumer-controls.md";
 
   function makeDeps(stub: Stub, argv: string[]) {
     return {
@@ -180,6 +257,7 @@ describe("runCli", () => {
       files: {
         [README_PATH]: `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
         [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`,
+        [DOC_PATH]: "",
       },
       writes: [],
       stdout: [],
@@ -192,11 +270,35 @@ describe("runCli", () => {
     }
   });
 
+  it("writes the docs target when its placeholder-pin tag comments are outdated", () => {
+    const stub: Stub = {
+      files: {
+        [README_PATH]: `      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
+        [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
+        [DOC_PATH]: [
+          `- uses: ${SELF_REPO}/prepare@<full-sha> # v2.0.0`,
+          `- uses: ${SELF_REPO}/review@<full-sha> # v2.0.0`,
+          `- uses: ${SELF_REPO}/publish@<full-sha> # v2.0.0`,
+        ].join("\n"),
+      },
+      writes: [],
+      stdout: [],
+      stderr: [],
+    };
+    expect(runCli(makeDeps(stub, ["2.1.0", NEW_SHA]))).toBe(0);
+    expect(stub.writes).toHaveLength(1);
+    expect(stub.writes[0]?.path).toBe(DOC_PATH);
+    const written = stub.writes[0]?.content ?? "";
+    expect((written.match(/@<full-sha> # v2\.1\.0(?!-)/g) ?? []).length).toBe(3);
+    expect(written).not.toContain("v2.0.0");
+  });
+
   it("writes only the workflow file when README is already up to date", () => {
     const stub: Stub = {
       files: {
         [README_PATH]: `      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
         [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`,
+        [DOC_PATH]: "",
       },
       writes: [],
       stdout: [],
@@ -213,6 +315,7 @@ describe("runCli", () => {
       files: {
         [README_PATH]: `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
         [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
+        [DOC_PATH]: "",
       },
       writes: [],
       stdout: [],
@@ -229,6 +332,7 @@ describe("runCli", () => {
       files: {
         [README_PATH]: `      uses: ${SELF_REPO}@${NEW_SHA} # v2.1.0`,
         [WORKFLOW_PATH]: `      uses: ${SELF_REPO}/prepare@${NEW_SHA} # v2.1.0`,
+        [DOC_PATH]: `- uses: ${SELF_REPO}/prepare@<full-sha> # v2.1.0`,
       },
       writes: [],
       stdout: [],
@@ -250,6 +354,7 @@ describe("runCli", () => {
       files: {
         [README_PATH]: "no pins here",
         [WORKFLOW_PATH]: "no pins here either",
+        [DOC_PATH]: "no pins here either",
       },
       writes: [],
       stdout: [],
@@ -278,7 +383,7 @@ describe("runCli", () => {
     const readmeOriginal = `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`;
     const workflowOriginal = `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`;
     const stub: Stub = {
-      files: { [README_PATH]: readmeOriginal, [WORKFLOW_PATH]: workflowOriginal },
+      files: { [README_PATH]: readmeOriginal, [WORKFLOW_PATH]: workflowOriginal, [DOC_PATH]: "" },
       writes: [],
       stdout: [],
       stderr: [],
@@ -320,7 +425,7 @@ describe("runCli", () => {
     const readmeOriginal = `      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`;
     const workflowOriginal = `      uses: ${SELF_REPO}/prepare@${OLD_SHA} # v2.1.0-pre`;
     const stub: Stub = {
-      files: { [README_PATH]: readmeOriginal, [WORKFLOW_PATH]: workflowOriginal },
+      files: { [README_PATH]: readmeOriginal, [WORKFLOW_PATH]: workflowOriginal, [DOC_PATH]: "" },
       writes: [],
       stdout: [],
       stderr: [],

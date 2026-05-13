@@ -126,11 +126,11 @@ Convenient — follows the `v2` tag. Trusts future releases from the maintainer 
   uses: milanhorvatovic/codex-ai-code-review-action/prepare@v2
 ```
 
-Security-conscious — immutable. Immune to tag movement or account compromise. Replace `<tag>` with the release tag you want to pin (e.g., `v2.0.0`) and `<full-sha>` with its commit SHA; resolve the SHA with `gh api repos/milanhorvatovic/codex-ai-code-review-action/commits/<tag> --jq '.sha'`:
+Security-conscious — immutable. Immune to tag movement or account compromise. Replace `<tag>` with the release tag you want to pin and `<full-sha>` with its commit SHA; resolve the SHA with `gh api repos/milanhorvatovic/codex-ai-code-review-action/commits/<tag> --jq '.sha'`:
 
 ```yaml
 - id: prepare
-  uses: milanhorvatovic/codex-ai-code-review-action/prepare@<full-sha> # v2.0.0
+  uses: milanhorvatovic/codex-ai-code-review-action/prepare@<full-sha> # v2.1.0
 ```
 
 Version tags are mutable references controlled by the maintainer account, while SHA pinning removes that trust dependency.
@@ -138,8 +138,8 @@ Version tags are mutable references controlled by the maintainer account, while 
 The same pattern applies to the `review` and `publish` actions. Pin all three sub-actions to the **same** `<full-sha>` from a single release — `prepare`, `review`, and `publish` share artifact layout and schema, and mixing SHAs from different releases can break the workflow:
 
 ```yaml
-- uses: milanhorvatovic/codex-ai-code-review-action/review@<full-sha> # v2.0.0
-- uses: milanhorvatovic/codex-ai-code-review-action/publish@<full-sha> # v2.0.0
+- uses: milanhorvatovic/codex-ai-code-review-action/review@<full-sha> # v2.1.0
+- uses: milanhorvatovic/codex-ai-code-review-action/publish@<full-sha> # v2.1.0
 ```
 
 Inside this repository, `review/action.yaml` SHA-pins `openai/codex-action`. That transitive pin is only frozen for you when you pin this action itself to a full SHA — at the SHA you chose, `review/action.yaml` is fixed and the `openai/codex-action` reference cannot move. Pinning to `@v2` does not carry that guarantee: a future `v2` release can update the transitive SHA.

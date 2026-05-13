@@ -2,9 +2,12 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { parseVersion } from "./changelog.js";
+import { SELF_REPO_REGEX_SOURCE } from "./self-repo.js";
 
-const SELF_PIN_PATTERN =
-  /(milanhorvatovic\/codex-ai-code-review-action)(\/[\w./-]+?)?@[0-9a-f]{40}(?:[ \t]*#[ \t]*[\w.+-]+)?/g;
+const SELF_PIN_PATTERN = new RegExp(
+  `(${SELF_REPO_REGEX_SOURCE})(\\/[\\w./-]+?)?@[0-9a-f]{40}(?:[ \\t]*#[ \\t]*[\\w.+-]+)?`,
+  "g",
+);
 
 const SHA_TAG_NOTE = /(# SHA corresponds to tag )v\d+\.\d+\.\d+(?:-[\w.-]+)?( — update when adopting a new release\.)/g;
 

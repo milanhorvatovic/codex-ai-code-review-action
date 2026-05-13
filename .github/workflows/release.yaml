@@ -144,17 +144,24 @@ jobs:
       # Resolve the refresh PR number for the auto-approve and auto-merge steps below. This
       # runs whether the previous step opened a new PR or found an existing one (e.g. on a
       # release.yaml re-run for the same tag), and is a no-op when no diff was produced so
-      # no PR exists.
+      # no PR exists. Fail-open like the steps that follow: a transient `gh pr list` outage
+      # warns and emits an empty `number` output (the downstream steps then short-circuit
+      # on `outputs.number != ''`) instead of aborting the whole release job.
       - name: Resolve self-pin refresh PR number
         id: refresh-pr
         if: ${{ !contains(github.ref_name, '-') }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          set -euo pipefail
+          set +e
+          set -uo pipefail
           VERSION_NUM="${GITHUB_REF_NAME#v}"
           BRANCH="docs/refresh-self-pins-v${VERSION_NUM}"
-          PR=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if ! PR=$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[0].number // empty'); then
+            echo "::warning::Failed to query open refresh PRs for ${BRANCH} (likely a transient gh CLI or GitHub API outage); auto-approve and auto-merge steps will no-op for this run. The refresh PR — if one was opened — remains open for manual review."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -z "${PR}" ]; then
             echo "No open refresh PR for ${BRANCH}; auto-approve and auto-merge steps will no-op."
             echo "number=" >> "$GITHUB_OUTPUT"

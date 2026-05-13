@@ -479,6 +479,25 @@ describe("validateUnifiedDiff strict mode (expectedSha + expectedVersion)", () =
     expect(result).toEqual({ ok: true });
   });
 
+  it("rejects a real-SHA refresh whose added side drops the tag comment entirely", () => {
+    // Strict mode requires the trailing `# vX.Y.Z` tag on every added real-SHA self-pin
+    // so the auto-approval audit body's claim ("matching `# v${VERSION_NUM}` tag comment")
+    // is actually enforced. A refresh PR that bumps the SHA correctly but strips the
+    // tag must not mask-equal the old line.
+    const hunk = [
+      `@@ -10,1 +10,1 @@`,
+      `-      uses: ${SELF_REPO}@${OLD_SHA} # v2.0.0`,
+      `+      uses: ${SELF_REPO}@${NEW_SHA}`,
+    ].join("\n");
+    const result = validateUnifiedDiff(buildDiff(".github/workflows/codex-review.yaml", hunk), {
+      expectedSha: NEW_SHA,
+      expectedVersion: EXPECTED_VERSION,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toContain("not a self-pin or sha-tag-note refresh");
+  });
+
   it("rejects a placeholder-pin refresh whose added side drops the tag comment entirely", () => {
     // Placeholder pins carry no release-specific SHA, so the tag comment is the only
     // value tying a placeholder line to a release. Strict mode must require it; a

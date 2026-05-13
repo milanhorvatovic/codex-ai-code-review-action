@@ -61,15 +61,21 @@ function buildStrictPatterns(sha: string, version: string): Patterns {
   const shaEsc = escapeRegex(sha);
   const verEsc = escapeRegex(version);
   return {
+    // Strict mode requires the trailing `# v${verEsc}` tag on every added self-pin —
+    // both real-SHA and placeholder forms. The post-tag auto-approval body asserts
+    // this guarantee verbatim, and the release-engineered refresh script always
+    // emits the tag, so a refresh PR that strips it indicates a regression worth
+    // surfacing for manual review rather than silently auto-approving. Loose mode
+    // (used to mask the removed/old side and for non-strict callers) keeps the tag
+    // optional so a bare pin in older history still parses cleanly.
     selfPin: new RegExp(
-      `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@${shaEsc}(?:[ \\t]*#[ \\t]*v${verEsc})?`,
+      `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@${shaEsc}[ \\t]*#[ \\t]*v${verEsc}`,
       "g",
     ),
     // Placeholder pins carry no release-specific SHA — the `<full-sha>` token is
     // literal on both sides — so the tag comment is the only value that must match
-    // the expected release. Make it mandatory in strict mode: a refresh PR that
-    // drops the trailing `# vX.Y.Z` would otherwise mask-equal the old line and
-    // pass the auto-approval guard without proving any version bump occurred.
+    // the expected release. Mandatory for the same reason as the real-SHA pattern
+    // above, but here it is also the only release-tied check.
     placeholderPin: new RegExp(
       `(${SELF_REPO_REGEX_SOURCE}(?:\\/[\\w./-]+?)?)@<full-sha>[ \\t]*#[ \\t]*v${verEsc}`,
       "g",

@@ -4,7 +4,7 @@
     "url": "https://github.com/milanhorvatovic/codex-ai-code-review-action/issues"
   },
   "dependencies": {
-    "@actions/artifact": "6.2.1",
+    "@actions/artifact": "6.3.1",
     "@actions/core": "3.0.1",
     "@actions/exec": "3.0.0",
     "@actions/github": "9.1.1"
@@ -14,12 +14,12 @@
     "@eslint/js": "10.0.1",
     "@types/node": "25.9.2",
     "@vitest/coverage-v8": "4.1.8",
-    "esbuild": "0.28.0",
-    "eslint": "10.4.1",
-    "tsx": "4.22.4",
+    "esbuild": "0.28.2",
+    "eslint": "10.12.0",
+    "tsx": "4.23.15",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.60.1",
-    "vite": "8.0.16",
+    "typescript-eslint": "8.71.1",
+    "vite": "8.3.4",
     "vitest": "4.1.8"
   },
   "engines": {

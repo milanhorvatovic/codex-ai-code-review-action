@@ -107,6 +107,12 @@ The subsections below describe how to wire this action into a workflow safely.
 
 If you are adopting this action in a private repository or for a team, work through [`docs/consumer-controls.md`](docs/consumer-controls.md) — a single auditable checklist that maps the controls below to specific workflow-file requirements a security reviewer can verify in one pass.
 
+### Patched Node.js runtime
+
+Use runners whose bundled `node24` runtime is Node.js **24.22.1 or later in the 24.x line**, covering the [October 2026 security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases), including Brotli CVE-2026-111497. The `prepare` and `publish` JavaScript actions use this runner-managed runtime. `actions/setup-node` changes the shell's Node version, but does not replace the runtime used by JavaScript actions. Neither `runs.using: node24` nor `ubuntu-latest` proves that the installed patch is current.
+
+Update self-hosted runner installations and their images, then verify the bundled executable, typically `<runner-install>/externals/node24/bin/node --version`. For hosted runners, verify the runtime in the actual job before processing PR data. See [runtime verification](CONTRIBUTING.md#runtime-verification) for commands and release checks.
+
 ### Do not use `pull_request_target`
 
 > Always use `pull_request` as the trigger for this action. `pull_request_target` runs the workflow YAML from the base branch, but it executes in the base-repository context with access to repository secrets and broader token permissions. When a workflow handles untrusted pull request content, that combination creates a straightforward secret-exfiltration path for a malicious fork PR.

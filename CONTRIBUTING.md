@@ -7,6 +7,29 @@ Thank you for considering contributing to Codex AI Code Review Action!
 - Node.js 24 (see `mise.toml` for the exact version)
 - npm
 
+## Runtime verification
+
+Development and CI shell commands pin Node.js 24.22.1 in `mise.toml`, `package.json`, the lockfile root metadata, and workflow setup steps. Keep these settings consistent. The [October 2026 advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) lists patched releases 22.23.4, 24.22.1, and 26.12.1. This project stays on Node 24.
+
+After installing the pinned runtime, verify the shell executable before building:
+
+```bash
+node -p 'JSON.stringify({version: process.version, executable: process.execPath})'
+npm ci
+npm run build
+```
+
+The bundles target `node24`; they do not embed Node.js. JavaScript actions, including third-party actions, use the runner's bundled runtime rather than the shell's Node. Update runner installations or images separately. For a Linux or macOS Actions job, enable step debug logging and inspect the `Node Action run:` executable path. Set `RUNNER_NODE24` to that absolute path, then check it before handling PR inputs:
+
+```bash
+: "${RUNNER_NODE24:?Set to the runner bundled node24 executable}"
+"$RUNNER_NODE24" -p 'JSON.stringify({version: process.version, executable: process.execPath})'
+```
+
+For a standard self-hosted installation, run `<runner-install>/externals/node24/bin/node --version` directly (use `node.exe` on Windows). Require 24.22.1 or later in the 24.x line. If the runtime layout differs, locate the executable selected by the runner and verify that executable. A shell `node --version` check alone does not verify the action runtime. Re-run CI after updating runners; rebuilding `dist/` or changing an action SHA alone cannot patch Node.js. Existing consumer pins require a normal reviewed release update to receive repository changes.
+
+There are no repository-owned Dockerfiles or service deployment configurations. Runner rollout and verification are operational requirements; source pins do not establish which version a hosted or consumer runner is executing.
+
 ## Getting started
 
 ```bash
